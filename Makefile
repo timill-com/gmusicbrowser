@@ -25,12 +25,18 @@ ACTIVE_LINGUAS = $(shell $(LCMD))
 MARKDOWN= markdown
 
 all: locale doc
+test-modernization:
+	prove --norc -I. t/02_LayoutParser.t t/03_FrontendContract.t t/04_Gtk4LayoutRenderer.t t/05_FrontendLegacy.t t/06_LifecycleLegacy.t
+
+test-gtk4:
+	sh tools/run-gtk4-smoke
+
 clean:
 	rm -rf dist/
 distclean: clean
 	rm -rf locale/ layout_doc.html
 
-po/gmusicbrowser.pot : gmusicbrowser.pl *.pm plugins/*.pm layouts/*.layout
+po/gmusicbrowser.pot : gmusicbrowser.pl gmusicbrowser_gtk4.pl *.pm plugins/*.pm layouts/*.layout
 	perl po/create_pot.pl --quiet
 
 po/%.po : po/gmusicbrowser.pot
@@ -125,4 +131,3 @@ update-icon-cache:
 		echo "*** Icon cache not updated. After (un)install, run this:"; \
 		echo "***  $(update_icon_cache)" ; \
 	fi
-

@@ -24,11 +24,22 @@ Allowed statuses:
 
 | Module | GTK refs | Risk | Intended treatment | Roadmap | Status |
 |---|---:|---|---|---|---|
-| `gmusicbrowser.pl` | 533 | Critical | Extract lifecycle, actions, state, configuration, dialogs, URI intake, and scanning; retain a small frontend entry point | M2–M6 | Not started |
+| `gmusicbrowser.pl` | 533 | Critical | Extract lifecycle, actions, state, configuration, dialogs, URI intake, and scanning; retain a small frontend entry point | M2–M6 | Boundary work |
 | `gmusicbrowser_list.pm` | 243 | Critical | Split view models from GTK; rebuild SongList, SongTree, filter, mosaic, and cloud views | M2, M5 | Not started |
 | `gmusicbrowser_layout.pm` | 225 | Critical | Separate parser/model/registry; implement GTK3 and GTK4 renderers without changing layout syntax | M2–M5 | Not started |
 | `gmusicbrowser_tags.pm` | 156 | High | Separate tag operations from editors and filenames; add stream/staging inputs; port editors after common controls | M2, M5, M6 | Not started |
 | `gmusicbrowser_songs.pm` | 39 | Critical | Keep song/filter/random logic in core; introduce source/URI identity and availability; move GTK stores/combos into frontends | M2, M5, M6 | Not started |
+
+## Frontend foundation
+
+| Module | Toolkit coupling | Intended treatment | Roadmap | Status |
+|---|---|---|---|---|
+| `gmusicbrowser_frontend.pm` | None | Frozen first-slice command, state-event, and lifecycle contract | M2 | Boundary work |
+| `gmusicbrowser_frontend_legacy.pm` | None | Bridge allowlisted widget-independent legacy commands and state events | M2 | Boundary work |
+| `gmusicbrowser_layout_parser.pm` | None | Neutral versioned layout catalog; GTK3 adoption and golden comparison remain | M2 | Boundary work |
+| `gmusicbrowser_gtk4_binding.pm` | GTK4 GI | Binding probes and evidence-driven overrides | M1 | GTK4 in progress |
+| `gmusicbrowser_gtk4.pl` | GTK4 | Separate application entry point; proof slice only | M1, M4 | GTK4 in progress |
+| `gmusicbrowser_gtk4_layout.pm` | GTK4 | Registry/renderer; currently only the proof subset | M1, M4, M5 | GTK4 in progress |
 
 ## Playback and metadata modules
 

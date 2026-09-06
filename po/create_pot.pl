@@ -7,7 +7,7 @@ m/-q|--quiet/ and $verbose=0 for @ARGV;
 use FindBin;
 my $path=$FindBin::Bin;
 $path=~s#/[^/]*/?$##; #up one dir
-my @files=( "$path/gmusicbrowser.pl", glob("$path/*.pm"), glob("$path/plugins/*.pm"), glob("$path/layouts/*.layout") );
+my @files=( "$path/gmusicbrowser.pl", "$path/gmusicbrowser_gtk4.pl", glob("$path/*.pm"), glob("$path/plugins/*.pm"), glob("$path/layouts/*.layout") );
 
 my (%msgid,%msgid_p);
 my (%comments,%comments_p);

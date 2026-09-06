@@ -23,6 +23,12 @@ Detailed planning documents:
   architecture, GTK replacement strategy, audio, KDE, testing, and packaging.
 - [Migration inventory](docs/modernization/INVENTORY.md) — source-by-source
   ownership, risk, intended treatment, and tracking status.
+- [Parity checklist](docs/modernization/PARITY_CHECKLIST.md) — GTK4 status for
+  legacy layouts, commands, preferences, interactions, plugins, and services.
+- [Modernization tests](docs/modernization/TESTING.md) — offline contract tests,
+  isolated Wayland smoke tests, and current dependency gates.
+- [Wave ownership](docs/modernization/WAVE_OWNERSHIP.md) — exclusive file
+  ownership, interface freezes, integration, and review state.
 - [Remote files](docs/modernization/REMOTE_FILES.md) — URI-based libraries,
   GIO/GVfs/KIO interoperability, desktop-provided access, caching, and safe
   remote mutations.

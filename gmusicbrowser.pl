@@ -535,6 +535,8 @@ require 'gmusicbrowser_songs.pm';
 require 'gmusicbrowser_tags.pm';
 require 'gmusicbrowser_layout.pm';
 require 'gmusicbrowser_list.pm';
+require 'gmusicbrowser_frontend.pm';
+require 'gmusicbrowser_frontend_legacy.pm';
 $HTTP_module=	-e $DATADIR.SLASH.'simple_http_wget.pm' && (grep -x $_.SLASH.'wget', split /:/, $ENV{PATH})	? 'simple_http_wget.pm' :
 		-e $DATADIR.SLASH.'simple_http_AE.pm'   && (grep -f $_.SLASH.'AnyEvent'.SLASH.'HTTP.pm', @INC)	? 'simple_http_AE.pm' :
 		'simple_http.pm';
@@ -1820,66 +1822,117 @@ if ($CmdLine{UseGnomeSession})
 
 #-------------INIT-------------
 
-{	Watch(undef, SongArray	=> \&SongArray_changed);
-	Watch(undef, $_	=> \&QueueChanged) for qw/QueueAction Queue/;
-	Watch(undef, $_	=> \&QueueUpdateNextSongs) for qw/Playlist Queue Sort Pos QueueAction/;
-	Watch(undef, $_ => sub { return unless defined $SongID && $TogPlay; HasChanged('PlayingSong'); }) for qw/CurSongID Playing/;
-	Watch(undef,RecentSongs	=> sub { UpdateRelatedFilter('Recent'); });
-	Watch(undef,NextSongs	=> sub { UpdateRelatedFilter('Next'); });
-	Watch(undef,CurSong	=> sub { UpdateRelatedFilter('Play'); });
-}
+our ($Volume,$Mute,$Frontend,$FrontendLegacy);
+my $frontend_state=
+{ Playing	=> sub {$TogPlay},
+  CurSong	=> sub {$SongID},
+  Time		=> sub {$PlayTime},
+  Duration	=> sub {defined $SongID ? Songs::Get($SongID,'length') : undef},
+  Vol		=> sub {$Vol_package ? GetVol() : $Volume},
+  Mute		=> sub {$Vol_package ? GetMute() : $Mute},
+};
+$Frontend=GMB::Frontend->new
+(	state => $frontend_state,
+	lifecycle =>
+	{	startup	=> \&ApplicationStartup,
+		activate => \&ApplicationActivate,
+		open	=> \&ApplicationOpen,
+		shutdown => \&ApplicationShutdown,
+	},
+);
+my $ApplicationActivated;
 
-LoadPlugins();
-if ($CmdLine{pluginlist}) { print "$_ : $Plugins{$_}{name}\n" for sort keys %Plugins; exit; }
-$SIG{HUP} = 'IGNORE';
-ReadSavedTags();
-$Options{AutoRemoveCurrentSong}=0 if $CmdLine{demo};
-
-# global Volume and Mute are used only for gstreamer and mplayer in SoftVolume mode
-our $Volume= $Options{Volume};
-$Volume=100 unless defined $Volume;
-our $Mute= $Options{Volume_mute} || 0;
-
-$PlayPacks{$_}= $_->init for keys %PlayPacks;
-
-%CustomBoundKeys= %{ make_keybindingshash($Options{CustomKeyBindings}) };
-
-$Options{version}=VERSION;
-LoadIcons();
-
-{	my $pp=$Options{AudioOut};
-	$pp= $Options{use_GST_for_server} ? 'Play_GST_server' : 'Play_Server' if $CmdLine{server};
-	for my $p ($pp, qw/Play_GST Play_123 Play_mplayer Play_mpv Play_GST_server Play_Server/)
-	{	next unless $p && $PlayPacks{$p};
-		$pp=$p;
-		last;
+sub ApplicationStartup
+{	{	Watch(undef, SongArray	=> \&SongArray_changed);
+		Watch(undef, $_	=> \&QueueChanged) for qw/QueueAction Queue/;
+		Watch(undef, $_	=> \&QueueUpdateNextSongs) for qw/Playlist Queue Sort Pos QueueAction/;
+		Watch(undef, $_ => sub { return unless defined $SongID && $TogPlay; HasChanged('PlayingSong'); }) for qw/CurSongID Playing/;
+		Watch(undef,RecentSongs	=> sub { UpdateRelatedFilter('Recent'); });
+		Watch(undef,NextSongs	=> sub { UpdateRelatedFilter('Next'); });
+		Watch(undef,CurSong	=> sub { UpdateRelatedFilter('Play'); });
 	}
-	$Options{AudioOut}||=$pp;
-	$PlayNext_package=$PlayPacks{$pp};
-	SwitchPlayPackage();
+
+	LoadPlugins();
+	if ($CmdLine{pluginlist}) { print "$_ : $Plugins{$_}{name}\n" for sort keys %Plugins; exit; }
+	$SIG{HUP} = 'IGNORE';
+	ReadSavedTags();
+	$Options{AutoRemoveCurrentSong}=0 if $CmdLine{demo};
+
+	# global Volume and Mute are used only for gstreamer and mplayer in SoftVolume mode
+	$Volume= $Options{Volume};
+	$Volume=100 unless defined $Volume;
+	$Mute= $Options{Volume_mute} || 0;
+
+	$FrontendLegacy=GMB::Frontend::Legacy->new
+	(	frontend	=> $Frontend,
+		commands	=> \%Command,
+		watch		=> \&Watch,
+		unwatch		=> \&UnWatch,
+		state		=> $frontend_state,
+	);
+
+	$PlayPacks{$_}= $_->init for keys %PlayPacks;
+
+	%CustomBoundKeys= %{ make_keybindingshash($Options{CustomKeyBindings}) };
+
+	$Options{version}=VERSION;
+	LoadIcons();
+
+	{	my $pp=$Options{AudioOut};
+		$pp= $Options{use_GST_for_server} ? 'Play_GST_server' : 'Play_Server' if $CmdLine{server};
+		for my $p ($pp, qw/Play_GST Play_123 Play_mplayer Play_mpv Play_GST_server Play_Server/)
+		{	next unless $p && $PlayPacks{$p};
+			$pp=$p;
+			last;
+		}
+		$Options{AudioOut}||=$pp;
+		$PlayNext_package=$PlayPacks{$pp};
+		SwitchPlayPackage();
+	}
+
+	IdleCheck() if $Options{StartCheck} && !$CmdLine{nocheck};
+	IdleScan()  if $Options{StartScan}  && !$CmdLine{noscan};
+	$Options{Icecast_port}=$CmdLine{port} if $CmdLine{port};
+
+	#$ListMode=[] if $CmdLine{empty};
+
+	$ListPlay=SongArray::PlayList->init;
+	Play() if $CmdLine{play} && !$PlayTime;
+
+	#SkipTo($PlayTime) if $PlayTime; #gstreamer (how I use it) needs the mainloop running to skip, so this is done after the main window is created
+
+	Layout::InitLayouts;
+	ActivatePlugin($_,'startup') for grep $Options{'PLUGIN_'.$_}, sort keys %Plugins;
+	Update_QueueActionList();
+	QueueChanged() if $QueueAction;
+	return 1;
 }
 
-IdleCheck() if $Options{StartCheck} && !$CmdLine{nocheck};
-IdleScan()  if $Options{StartScan}  && !$CmdLine{noscan};
-$Options{Icecast_port}=$CmdLine{port} if $CmdLine{port};
+sub ApplicationActivate
+{	my $data=shift;
+	if ($ApplicationActivated) {ShowHide(1); return 1}
+	CreateMainWindow($data->{layout});
+	ShowHide(0) if $data->{hidden};
+	SkipTo($PlayTime) if $PlayTime; #done only now because of gstreamer
 
-#$ListMode=[] if $CmdLine{empty};
+	CreateTrayIcon();
+	$ApplicationActivated=1;
+	return 1;
+}
 
-$ListPlay=SongArray::PlayList->init;
-Play() if $CmdLine{play} && !$PlayTime;
+sub ApplicationOpen
+{	return $FrontendLegacy->Open($_[0]);
+}
 
-#SkipTo($PlayTime) if $PlayTime; #gstreamer (how I use it) needs the mainloop running to skip, so this is done after the main window is created
-
-Layout::InitLayouts;
-ActivatePlugin($_,'startup') for grep $Options{'PLUGIN_'.$_}, sort keys %Plugins;
-Update_QueueActionList();
-QueueChanged() if $QueueAction;
-
-CreateMainWindow( $CmdLine{layout}||$Options{Layout} );
-ShowHide(0) if $CmdLine{hide} || ($Options{StartInTray} && $Options{UseTray} && $TrayIconAvailable);
-SkipTo($PlayTime) if $PlayTime; #done only now because of gstreamer
-
-CreateTrayIcon();
+my $lifecycle=$Frontend->Startup({profile=>$CmdLine{id}});
+die "$lifecycle->{error}\n" unless $lifecycle->{ok};
+my $hidden=$CmdLine{hide} || ($Options{StartInTray} && $Options{UseTray} && $TrayIconAvailable);
+$lifecycle=$Frontend->Activate
+({	reason=>'startup',
+	layout=>$CmdLine{layout}||$Options{Layout},
+	hidden=>$hidden ? 1 : 0,
+});
+die "$lifecycle->{error}\n" unless $lifecycle->{ok};
 
 if (my $cmds=delete $CmdLine{runcmd}) { run_command(undef,$_) for @$cmds; }
 $SIG{TERM} = \&Quit;
@@ -2052,8 +2105,15 @@ sub TurnOff
 	Quit('turnoff');
 }
 sub Quit
-{	my $turnoff;
-	$turnoff=1 if $_[0] && $_[0] eq 'turnoff';
+{	my $reason= $_[0] && !ref $_[0] && $_[0] eq 'turnoff' ? 'turnoff' :
+		    $_[0] && !ref $_[0] && $_[0] eq 'TERM' ? 'signal' : 'command';
+	my $result=$Frontend->Shutdown({reason=>$reason});
+	warn "$result->{error}\n" unless $result->{ok};
+	return $result->{value};
+}
+sub ApplicationShutdown
+{	my $data=shift;
+	my $turnoff= $data->{reason} eq 'turnoff';
 	$Options{SavedPlayTime}= $PlayTime if $Options{RememberPlayTime};
 	&Stop if defined $TogPlay;
 	@ToScan=@ToAdd_Files=();

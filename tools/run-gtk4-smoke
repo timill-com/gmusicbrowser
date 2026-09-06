@@ -1,0 +1,51 @@
+#!/bin/sh
+
+# Copyright (C) 2026 gmusicbrowser contributors
+#
+# This file is part of Gmusicbrowser.
+# Gmusicbrowser is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License version 3, as
+# published by the Free Software Foundation
+
+set -eu
+
+gmb_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+gmb_host_runtime=${XDG_RUNTIME_DIR:-}
+gmb_wayland_display=${WAYLAND_DISPLAY:-}
+
+if test -z "$gmb_host_runtime" || test -z "$gmb_wayland_display" ||
+	! test -S "$gmb_host_runtime/$gmb_wayland_display"
+then
+	echo "GTK4 smoke skipped: no real Wayland connection is available" >&2
+	exit 77
+fi
+
+gmb_smoke_dir=$(mktemp -d "${TMPDIR:-/tmp}/gmusicbrowser-gtk4-smoke.XXXXXX")
+trap 'rm -rf "$gmb_smoke_dir"' EXIT HUP INT TERM
+
+mkdir -p "$gmb_smoke_dir/config" "$gmb_smoke_dir/data" \
+	"$gmb_smoke_dir/cache" "$gmb_smoke_dir/state" "$gmb_smoke_dir/runtime"
+chmod 700 "$gmb_smoke_dir/runtime"
+ln -s "$gmb_host_runtime/$gmb_wayland_display" \
+	"$gmb_smoke_dir/runtime/$gmb_wayland_display"
+
+XDG_CONFIG_HOME="$gmb_smoke_dir/config"
+XDG_DATA_HOME="$gmb_smoke_dir/data"
+XDG_CACHE_HOME="$gmb_smoke_dir/cache"
+XDG_STATE_HOME="$gmb_smoke_dir/state"
+XDG_RUNTIME_DIR="$gmb_smoke_dir/runtime"
+GDK_BACKEND=wayland
+GMB_GTK4_SMOKE=1
+export XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME XDG_STATE_HOME XDG_RUNTIME_DIR
+export GDK_BACKEND GMB_GTK4_SMOKE
+unset DISPLAY DBUS_SESSION_BUS_ADDRESS PERL5LIB PERL5OPT
+
+cd "$gmb_root"
+if perl -I. -e 'require "gmusicbrowser_gtk4_binding.pm"; my ($ok,$reason)=GMB::Gtk4::Binding::try_init(); if (!$ok) { print STDERR "GTK4 smoke blocked: $reason\n"; exit 77; }'
+then
+	:
+else
+	gmb_status=$?
+	exit "$gmb_status"
+fi
+timeout 30s prove --norc -I. t/gtk4/00_Binding.t t/gtk4/10_ProofOfLife.t

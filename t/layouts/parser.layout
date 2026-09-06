@@ -1,0 +1,23 @@
+[parser base]
+Name= _"Parser base"
+Type=G
+VBmain= (border=2) 5_Play2(click1=PlayPause) _HBbuttons
+HBbuttons= Play Quit
+Mystery=keep me
+
+[parser child] based on parser base
+Name= _"Parser child"
+HBbuttons=
+VBextra= Label(text="extra")
+
+[parser unnamed] based on parser base
+Type=G
+
+{Column parser column}
+title=Parser column
+width=120
+value:Text(markup="%t")
+size:Option(min=1,max=9)
+
+{broken header
+ignored=value

@@ -1,0 +1,4 @@
+[gtk4 proof]
+Type=G
+VBmain= Label(text="GTK4 proof of life") HBbuttons
+HBbuttons= Play Quit
