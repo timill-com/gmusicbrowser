@@ -1,11 +1,11 @@
 # Session handoff
 
-Status: `HEAD` is `527eae9` "gtk4: share one labels fixture across the renderer
-tests". Four increments this session: `Next`/`Prev` with the port's first
-shared-boundary change and a working GTK3 regression smoke; `Filler` with the
-legacy `ApplyCommonOptions` size request; the shared test labels fixture; and
-D025/D026 for `AB`/`WB` with real-Wayland `AB` alignment coverage.
-Uncommitted on top: the last of those.
+Status: `HEAD` is `b85b89d` "docs: decide AB and WB, and cover AB alignment on
+real Wayland". The tree is clean. Four increments landed this session:
+`Next`/`Prev` with the port's first shared-boundary change and a working GTK3
+regression smoke; `Filler` with the legacy `ApplyCommonOptions` size request;
+the shared test labels fixture; and D025/D026 for `AB`/`WB` with real-Wayland
+`AB` alignment coverage.
 
 Last session: 2026-09-07. Branch `gtk4-alpha`.
 
@@ -17,8 +17,7 @@ previous session stopped and what the next one should verify before continuing.
 The GTK4 work is an early spike, not a partly-finished migration. Do not assume
 otherwise from the size of the planning documents.
 
-- `gtk4-alpha` is six commits past `master`: `initial plan`, `agents file`,
-  `initial gtk4 stubs`, then the box/icon, `-symbolic`, and `Stop` commits.
+- `gtk4-alpha` is ten commits past `master`; the list is in the next section.
 - All 1,444 `Gtk3::` references are still present and unmodified across 27
   files. None has been ported.
 - GTK3 is the complete, working application (about 33,000 lines in the main
@@ -28,22 +27,27 @@ otherwise from the size of the planning documents.
 
 ## What is committed and what is not
 
-Everything through the labels fixture is committed; `HEAD` is `527eae9` and
-`gtk4-alpha` is nine commits past `master`.
+Everything is committed. `HEAD` is `b85b89d` and `gtk4-alpha` is ten commits
+past `master`:
 
-Uncommitted in the tree is the D025/D026 increment:
-
-	M docs/modernization/DECISIONS.md
-	M docs/modernization/PARITY_CHECKLIST.md
-	M docs/modernization/SESSION_HANDOFF.md
-	M docs/modernization/TESTING.md
-	M t/gtk4/30_Box.t
-	?? t/layouts/align.layout
+	b85b89d docs: decide AB and WB, and cover AB alignment on real Wayland
+	527eae9 gtk4: share one labels fixture across the renderer tests
+	fc65354 gtk4: render Filler and apply the legacy size request
+	6d30dcf gtk4: render the Next and Prev widgets
+	4ed26ad gtk4: render the Stop widget from a stateless button table
+	978bbdf gtk4: fall back to the -symbolic icon name
+	e016554 gtk4: correct box packing geometry and resolve icons by theme name
+	ec217bc initial gtk4 stubs
+	d4c87d0 agents file
+	774aa2e initial plan
 
 No GTK3 production code, bundled layout, or file in `pix/` has been touched by
-any of the four increments. `gmusicbrowser.pl` is unmodified. This last
-increment changes no production code at all: it is two decision entries plus
-test coverage of an existing implementation.
+any of the four increments this session. `gmusicbrowser.pl` is unmodified. The
+last increment changes no production code at all: it is two decision entries
+plus test coverage of an implementation that already existed.
+
+Files added this session: `tools/run-gtk3-smoke`, `t/RendererLabels.pm`,
+`t/layouts/sizing.layout`, `t/layouts/align.layout`.
 
 ## Renderer widget state
 
