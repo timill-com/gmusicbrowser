@@ -5,6 +5,13 @@ VBmain= (border=2) 5_Play2(click1=PlayPause) _HBbuttons
 HBbuttons= Play Quit
 Mystery=keep me
 
+[parser fixed]
+Name= _"Parser fixed"
+Type=G
+FBmain= .1,0,.8,0 HBinner
+FBplain= 5,4 Play3 -5,.4,5,.2 Quit3
+HBinner= Label(text="inner")
+
 [parser child] based on parser base
 Name= _"Parser child"
 HBbuttons=

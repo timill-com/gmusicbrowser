@@ -20,7 +20,7 @@ my $catalog=Layout::Parser::ParseFiles
 );
 
 is($catalog->{version},1,'catalog version');
-is_deeply($catalog->{order},['parser base','parser child','parser unnamed','gtk4 proof'],'layout declaration order');
+is_deeply($catalog->{order},['parser base','parser fixed','parser child','parser unnamed','gtk4 proof'],'layout declaration order');
 is($catalog->{layouts}{'parser base'}{metadata}{Name},'translated Parser base','metadata translation');
 is($catalog->{layouts}{'parser base'}{source}{line},1,'layout source line');
 
@@ -44,11 +44,23 @@ is($vbmain->{children}[0]{packing}{raw},'5_','raw packing preserved');
 is($vbmain->{children}[0]{raw_options},'click1=PlayPause','raw widget options preserved');
 is_deeply($base->{roots},['VBmain'],'root detected');
 
+my $fixed=$catalog->{layouts}{'parser fixed'};
+my ($fbmain)=grep $_->{name} eq 'FBmain',@{$fixed->{nodes}};
+is(scalar @{$fbmain->{children}},1,'FB position prefix is not a separate child');
+is($fbmain->{children}[0]{name},'HBinner','FB child named after its prefix');
+is($fbmain->{children}[0]{kind},'container_ref','FB child container reference identified');
+is($fbmain->{children}[0]{packing}{raw},'.1,0,.8,0','FB fractional position and size kept as packing');
+my ($fbplain)=grep $_->{name} eq 'FBplain',@{$fixed->{nodes}};
+is_deeply([map $_->{name},@{$fbplain->{children}}],[qw/Play3 Quit3/],'adjacent FB children split on their prefixes');
+is($fbplain->{children}[0]{packing}{raw},'5,4','FB integer position kept as packing');
+is($fbplain->{children}[1]{packing}{raw},'-5,.4,5,.2','FB negative and fractional position kept as packing');
+is($fbplain->{children}[1]{element},'Quit','FB child keeps its base element');
+
 is($base->{unknown}[0]{name},'Mystery','unknown property preserved');
 my ($unknown)=grep $_->{code} eq 'unknown_property',@{$catalog->{diagnostics}};
 is($unknown->{source}{line},6,'unknown property diagnostic has source line');
 my ($invalid)=grep $_->{code} eq 'invalid_header',@{$catalog->{diagnostics}};
-is($invalid->{source}{line},22,'invalid header diagnostic has source line');
+is($invalid->{source}{line},29,'invalid header diagnostic has source line');
 
 my $skin=$catalog->{skins}{'Column parser column'};
 is($skin->{definitions}{width},120,'skin definition parsed');
@@ -82,6 +94,11 @@ my ($exaile)=grep $_->{name} eq 'VBSongInfo',@{$bundled->{layouts}{Exaile}{nodes
 is_deeply([map $_->{name},@{$exaile->{children}}],[qw/Title Artist Album Filler2/],'adjacent widget split after options');
 is($exaile->{children}[2]{raw_options},'yalign=1,ellipsize=end,markup="from %l"','adjacent widget options preserved');
 is($exaile->{children}[3]{packing}{raw},100,'adjacent widget packing preserved');
+
+my ($fslower)=grep $_->{name} eq 'FBLower',@{$bundled->{layouts}{'default fullscreen'}{nodes}};
+is(scalar @{$fslower->{children}},1,'bundled FB declares one child, not a phantom widget');
+is($fslower->{children}[0]{name},'HBLower','bundled FB child is the named container');
+is($fslower->{children}[0]{packing}{raw},'.1,0,.8,0','bundled FB packing preserved');
 
 ok(!grep(/^Gtk(?:3|4)(?:::|\.pm)/,keys %INC),'parser imports no GTK binding');
 ok(!grep(/^(?:Gdk|Wnck)(?:::|\.pm)/,keys %INC),'parser imports no GDK or Wnck binding');

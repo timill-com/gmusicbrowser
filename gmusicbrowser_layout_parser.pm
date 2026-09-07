@@ -277,6 +277,9 @@ sub _extract_children
 		{	if ($text=~s/^((?:_?"[^"]*[^\\]")|[^ ]*)\s+//) { $packing=$1; }
 			else { last; }
 		}
+		elsif ($type eq 'FB')	# "5,4 " or "-5,.4,5,.2 ", position and optional size
+		{	$text=~s/^(-?\.?\d+,-?\.?\d+(?:,\.?\d+,\.?\d+)?),?\s+// and $packing=$1;
+		}
 		my ($name)=$text=~m/^([^\s(]*)/;
 		my $length=length($name||'');
 		if (substr($text,$length,1) eq '(')
