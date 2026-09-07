@@ -12,6 +12,21 @@ package Layout::Renderer::Gtk4;
 
 my %Single= map {$_=>1} qw/SB FR EB AB WB/;	# containers holding exactly one child
 
+# GTK4 reduced GtkIconSize to inherit/normal/large, so the legacy size= names
+# cannot be passed through. These are the pixel sizes GTK3 resolves them to,
+# read from Gtk3::IconSize::lookup on GTK 3.24.41, and set_pixel_size
+# reproduces each one exactly. SIZE_BUTTONS ('large-toolbar', 24) is the
+# Layout::Button default, so it applies to every button with no size= of its
+# own; SIZE_FLAGS is 'menu'.
+my %IconSizes=
+(	'menu'		=> 16,
+	'small-toolbar'	=> 16,
+	'large-toolbar'	=> 24,
+	'button'	=> 16,
+	'dnd'		=> 32,
+	'dialog'	=> 48,
+);
+
 # GTK4 removed the stock-item system, so the legacy 'gtk-*' names in existing
 # layouts resolve to nothing. Map them to the freedesktop names they stood for.
 my %StockNames=
@@ -59,15 +74,19 @@ my %Buttons=
 	},
 );
 
+# The legacy Layout::Button defaults (gmusicbrowser_layout.pm:3001). These are
+# the defaults for every button, not rare options, so a button built without
+# them is wrong even when the layout names no size= or relief=.
+my %ButtonDefaults= (relief=>'none', size=>'large-toolbar');
+
 # The only options a %Buttons widget acts on. Everything else a layout supplies
 # stays in the parsed catalog so a saved layout round trips (D002), and
 # Unhandled reports it so an ignored option is recorded rather than silently
 # accepted. What that currently covers: 'nbsongs' and 'group', which only feed
-# the Prev/Next click3 song chooser; 'size' and 'relief', which need the legacy
-# Layout::Button defaults; and 'button=0', which asks for the EventBox form
-# instead of a real button. 'minwidth'/'minheight' are handled for every widget
-# by _ApplyCommonOptions, so they are not reported here.
-my %ButtonHandled= map {$_=>1} qw/icon stock text tip minwidth minheight/;
+# the Prev/Next click3 song chooser, and 'button=0', which asks for the
+# EventBox form instead of a real button. 'minwidth'/'minheight' are handled
+# for every widget by _ApplyCommonOptions, so they are not reported here.
+my %ButtonHandled= map {$_=>1} qw/icon stock text tip size relief minwidth minheight/;
 
 # the bundled aliases that have no file of their own, from %IconsFallbacks in
 # gmusicbrowser.pl
@@ -413,6 +432,7 @@ sub _CreateWidget
 	{	$widget=Gtk4::Button->new_with_label('');
 		# with no icon option the button follows the state through its label
 		$self->_SetIcon($widget,$node->{options}{values});
+		$self->_ApplyButtonStyle($widget,$node->{options}{values});
 		$self->_SetPlayLabel($widget,$self->{frontend}->State('Playing'));
 		$widget->signal_connect(clicked => sub
 		{	my $result=$self->{frontend}->Dispatch('PlayPause',undef,$self->{context});
@@ -427,6 +447,7 @@ sub _CreateWidget
 	elsif ($element eq 'Quit')
 	{	$widget=Gtk4::Button->new_with_label($self->{labels}{quit});
 		$self->_SetIcon($widget,$node->{options}{values});
+		$self->_ApplyButtonStyle($widget,$node->{options}{values});
 		$widget->signal_connect(clicked => sub
 		{	my $result=$self->{frontend}->Dispatch('Quit',undef,$self->{context});
 			warn "$result->{error}\n" unless $result->{ok};
@@ -458,12 +479,44 @@ sub _ApplyCommonOptions
 	$widget->set_size_request($minwidth,$minheight);
 }
 
+# The legacy relief= and size= options, which apply to every Layout::Button
+# through @default_options rather than only where a layout names them.
+#
+# relief: GTK4 removed set_relief. 'none' is the has-frame-off button, which is
+# what GTK3 draws for relief=none, and 'normal' is the framed default.
+#
+# size: GTK4 reduced GtkIconSize to inherit/normal/large, so the legacy name
+# cannot be passed through. set_pixel_size on the image reproduces the GTK3
+# pixel size exactly. set_icon_name creates that image itself, so styling its
+# child keeps Button->get_icon_name working; replacing the child with an
+# explicit image would leave get_icon_name undefined.
+sub _ApplyButtonStyle
+{	my ($self,$widget,$values)=@_;
+	# the layout's own value over the Layout::Button default, matching how %$opt
+	# overrides @default_options. No %Buttons entry sets either yet; the ones
+	# that will are the SIZE_FLAGS widgets, which need state first.
+	my %opt=(%ButtonDefaults, map {($_=>$values->{$_})}
+		grep defined $values->{$_}, qw/relief size/);
+	$widget->set_has_frame($opt{relief} eq 'none' ? 0 : 1);
+	my $pixels=$IconSizes{$opt{size}};
+	# an unknown size= name is left to the theme rather than guessed at, and is
+	# reported through Unhandled
+	return unless defined $pixels;
+	my $image=$widget->get_child;
+	return unless $image && $image->isa('Gtk4::Image');
+	$image->set_pixel_size($pixels);
+}
+
 # A stateless button: one command, an icon from the widget's default 'stock'
 # unless the layout names its own, and a text label only when no icon resolves.
 sub _CreateButton
 {	my ($self,$node,$def)=@_;
 	my $values=$node->{options}{values};
-	my @ignored=grep !$ButtonHandled{$_},@{$node->{options}{order}};
+	# a size= naming something outside %IconSizes is read but not acted on, so
+	# it stays reported rather than silently accepted
+	my @ignored=grep { !$ButtonHandled{$_}
+		|| ($_ eq 'size' && !defined $IconSizes{$values->{$_} || ''}) }
+		@{$node->{options}{order}};
 	$self->{unhandled}{$node->{name}}=\@ignored if @ignored;
 	my $widget=Gtk4::Button->new;
 	# the layout's own icon= or stock= wins over the widget's default, matching
@@ -471,6 +524,7 @@ sub _CreateButton
 	my %icon=%$values;
 	$icon{stock}=$def->{stock} unless defined $icon{icon} || defined $icon{stock};
 	my $name=$self->_SetIcon($widget,\%icon);
+	$self->_ApplyButtonStyle($widget,$values);
 	# a button with no usable icon must still be operable, so fall back to text
 	unless (defined $name)
 	{	my $text= defined $values->{text} ? $values->{text}

@@ -114,12 +114,24 @@ use lib '.';
 	our @ISA=('Gtk4::Widget::Double');
 	sub new { bless {label=>$_[1]},$_[0] }
 }
+{	package Gtk4::Image;
+	our @ISA=('Gtk4::Widget::Double');
+	sub new { bless {pixel_size=>-1},$_[0] }
+	sub set_pixel_size { $_[0]{pixel_size}=$_[1] }
+	sub get_pixel_size { $_[0]{pixel_size} }
+}
 {	package Gtk4::Button;
 	our @ISA=('Gtk4::Widget::Double');
-	sub new { bless {signals=>{}},$_[0] }
-	sub new_with_label { bless {label=>$_[1],signals=>{}},$_[0] }
-	sub set_label { $_[0]{label}=$_[1] }
-	sub set_icon_name { $_[0]{icon_name}=$_[1] }
+	sub new { bless {signals=>{},has_frame=>1},$_[0] }
+	sub new_with_label { bless {label=>$_[1],signals=>{},has_frame=>1},$_[0] }
+	sub set_label { $_[0]{label}=$_[1]; delete $_[0]{child} }
+	# real Gtk4::Button->set_icon_name builds a Gtk4::Image child, which is what
+	# carries the pixel size, so the double has to produce one too
+	sub set_icon_name { $_[0]{icon_name}=$_[1]; $_[0]{child}=Gtk4::Image->new }
+	sub get_icon_name { $_[0]{icon_name} }
+	sub get_child { $_[0]{child} }
+	sub set_has_frame { $_[0]{has_frame}=$_[1] }
+	sub get_has_frame { $_[0]{has_frame} }
 	sub set_tooltip_text { $_[0]{tooltip}=$_[1] }
 	sub signal_connect { $_[0]{signals}{$_[1]}=$_[2] }
 	sub activate { $_[0]{signals}{clicked}->($_[0]) }
@@ -404,11 +416,28 @@ is($dispatched{NextSong},2,'Prev did not dispatch NextSong');
 is($brenderer->Widget('Stop4')->{tooltip},'Stop','a suffixed Stop keeps the element default');
 is($brenderer->Widget('Next2')->{tooltip},'Skip','a suffixed Next honours its own layout tip');
 
+# The legacy relief= and size= options. Both come from Layout::Button
+# @default_options, so a button naming neither still gets relief=none and
+# size=large-toolbar rather than the GTK4 defaults.
+is($brenderer->Widget('Stop')->get_has_frame,0,'a button with no relief= takes the legacy relief=none');
+is($brenderer->Widget('Next2')->get_has_frame,1,'relief=normal keeps the button frame');
+is($brenderer->Widget('Prev3')->get_has_frame,0,'an explicit relief=none is frameless');
+is($brenderer->Widget('Play')->get_has_frame,0,'Play is a Layout::Button and takes the same relief default');
+is($brenderer->Widget('Quit')->get_has_frame,0,'Quit is a Layout::Button and takes the same relief default');
+# size= becomes a pixel size on the button's image child. These doubles have no
+# icon theme, so no icon resolves and every button here falls back to a text
+# label with no image to size. The pixel sizes themselves are asserted against
+# a real theme in t/gtk4/40_Icons.t; all this file can prove is that a
+# text-fallback button is left alone rather than being handed a stray image.
+is($brenderer->Widget('Stop')->get_child,undef,'a button that fell back to text has no image to size');
+is($brenderer->Widget('Stop5')->get_child,undef,'size=dialog does not fabricate an image without an icon');
+
 # Options the renderer does not implement stay in the catalog and are reported
 # rather than silently accepted. nbsongs and group only feed the click3 song
-# chooser; size and relief need the unimplemented Layout::Button defaults.
+# chooser.
 is_deeply($brenderer->Unhandled('Prev2'),[qw/nbsongs group/],'Prev2 reports its unhandled options');
-is_deeply($brenderer->Unhandled('Next2'),[qw/size relief/],'Next2 reports its unhandled options in layout order');
+is($brenderer->Unhandled('Next2'),undef,'size= and relief= are no longer reported as unhandled');
+is_deeply($brenderer->Unhandled('Stop6'),['size'],'a size= value outside the mapping is still reported');
 is($brenderer->Unhandled('Next'),undef,'a button with no options reports nothing unhandled');
 is($brenderer->Unhandled('Stop2'),undef,'a handled option is not reported as unhandled');
 my $b2=$bcatalog->{layouts}{'gtk4 buttons'};

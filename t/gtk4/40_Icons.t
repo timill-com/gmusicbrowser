@@ -157,6 +157,51 @@ for my $name (qw/Play Play2 Quit2/)
 	$probe->Destroy;
 }
 
+# The legacy size= icon sizes. GTK4 cut GtkIconSize down to
+# inherit/normal/large, so the five legacy names cannot be passed through: any
+# of them is a fatal enum error. set_pixel_size on the image reproduces the
+# pixel size Gtk3::IconSize::lookup reports for each name, which is what makes
+# this a faithful translation rather than a bucketing approximation.
+# Gtk4::Button->set_icon_name builds the image itself, so the size lands on
+# that child and Button->get_icon_name keeps working.
+{	my %expected=
+	(	Stop	=> 24,	# no size=, so Layout::Button's SIZE_BUTTONS default
+		Stop2	=> 16,	# menu, SIZE_FLAGS
+		Stop3	=> 16,	# small-toolbar
+		Stop4	=> 16,	# button
+		Stop5	=> 24,	# large-toolbar
+		Stop6	=> 32,	# dnd
+		Stop7	=> 48,	# dialog
+	);
+	for my $name (sort keys %expected)
+	{	my $image=$renderer->Widget($name)->get_child;
+		isa_ok($image,'Gtk4::Image');
+		is($image->get_pixel_size,$expected{$name},
+			"$name sizes its icon to $expected{$name}px");
+		# The pixel size must actually take effect, not merely be recorded.
+		# Note this check only discriminates above 16px: GTK4's own default
+		# icon size is 16, so the menu/button/small-toolbar rows measure
+		# correctly even against a renderer that ignores size= entirely. The
+		# get_pixel_size assertion above is what pins those three.
+		my ($min,$nat)=$image->measure('horizontal',-1);
+		is($nat,$expected{$name},"$name measures $expected{$name}px wide");
+	}
+	# an unrecognised size= must be left to the theme rather than guessed at
+	my $unknown=$renderer->Widget('Stop8')->get_child;
+	is($unknown->get_pixel_size,-1,'an unknown size= leaves the pixel size unset');
+	is_deeply($renderer->Unhandled('Stop8'),['size'],
+		'an unknown size= is still reported as unhandled');
+	is($renderer->Unhandled('Stop2'),undef,'a mapped size= is not reported as unhandled');
+
+	# relief=. GTK4 removed set_relief; has-frame is the property that draws or
+	# omits the frame GTK3 drew for relief=normal/none.
+	is($renderer->Widget('Stop')->get_has_frame,'',
+		'a button with no relief= takes the legacy relief=none');
+	is($renderer->Widget('Stop9')->get_has_frame,1,'relief=normal keeps the frame');
+	is($renderer->Widget('Quit')->get_has_frame,'',
+		'Quit is a Layout::Button and takes the same relief default');
+}
+
 $renderer->Destroy;
 
 # A %Buttons widget takes its icon from the table's default 'stock', so on a
@@ -217,8 +262,15 @@ $renderer->Destroy;
 	is($dispatched{NextSong},1,'clicking Prev did not dispatch NextSong');
 
 	# an option the renderer does not implement is reported, not applied
-	is_deeply($brenderer->Unhandled('Next2'),[qw/size relief/],
+	is_deeply($brenderer->Unhandled('Prev2'),[qw/nbsongs group/],
 		'a real widget reports the options it ignored');
+	# size= and relief= are now implemented, so Next2 has nothing left to report
+	is($brenderer->Unhandled('Next2'),undef,
+		'a real widget stops reporting an option once it is implemented');
+	is($brenderer->Widget('Next2')->get_child->get_pixel_size,16,
+		'a real button applies its layout size=');
+	is($brenderer->Widget('Next2')->get_has_frame,1,
+		'a real button applies its layout relief=');
 	is($brenderer->Widget('Next2')->get_tooltip_text,'Skip',
 		'a layout tip still overrides the default beside unhandled options');
 	$brenderer->Destroy;

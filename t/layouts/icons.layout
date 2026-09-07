@@ -1,3 +1,4 @@
 [gtk4 icons]
 Type=G
-VBroot= Play(icon=gtk-media-play) Quit(stock=gtk-quit) Play2(icon=gmb-random) Quit2(icon=gmb-queue0) Play3(icon=no-such-icon-name) Quit3
+VBroot= Play(icon=gtk-media-play) Quit(stock=gtk-quit) Play2(icon=gmb-random) Quit2(icon=gmb-queue0) Play3(icon=no-such-icon-name) Quit3 VBsizes
+VBsizes= Stop Stop2(size=menu) Stop3(size=small-toolbar) Stop4(size=button) Stop5(size=large-toolbar) Stop6(size=dnd) Stop7(size=dialog) Stop8(size=no-such-size) Stop9(relief=normal)
