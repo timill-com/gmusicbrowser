@@ -65,8 +65,9 @@ my %Buttons=
 # accepted. What that currently covers: 'nbsongs' and 'group', which only feed
 # the Prev/Next click3 song chooser; 'size' and 'relief', which need the legacy
 # Layout::Button defaults; and 'button=0', which asks for the EventBox form
-# instead of a real button.
-my %ButtonHandled= map {$_=>1} qw/icon stock text tip/;
+# instead of a real button. 'minwidth'/'minheight' are handled for every widget
+# by _ApplyCommonOptions, so they are not reported here.
+my %ButtonHandled= map {$_=>1} qw/icon stock text tip minwidth minheight/;
 
 # the bundled aliases that have no file of their own, from %IconsFallbacks in
 # gmusicbrowser.pl
@@ -156,6 +157,7 @@ sub _CreateContainer
 		: $element eq 'HP' || $element eq 'VP' ? $self->_CreatePaned($node)
 		: $Single{$element} ? $self->_CreateSingle($node)
 		: die _source($node).": GTK4 container '$element' is not implemented\n";
+	$self->_ApplyCommonOptions($container,$node->{options}{values});
 	# every legacy container accepts 'border' as padding around its contents
 	my $border=$node->{options}{values}{border};
 	if (defined $border && $border=~m/^\d+$/)
@@ -402,6 +404,11 @@ sub _CreateWidget
 		$text='' unless defined $text;
 		$widget=Gtk4::Label->new($text);
 	}
+	elsif ($element eq 'Filler')
+	{	# an empty box, as in legacy Gtk3::HBox->new; it exists to take up space
+		# through its packing prefix and minwidth/minheight, not to draw anything
+		$widget=Gtk4::Box->new('horizontal',0);
+	}
 	elsif ($element eq 'Play')
 	{	$widget=Gtk4::Button->new_with_label('');
 		# with no icon option the button follows the state through its label
@@ -431,8 +438,24 @@ sub _CreateWidget
 	else
 	{	die _source($node).": GTK4 widget '$element' is not implemented\n"; }
 	$self->_SetTip($widget,$node,$Buttons{$element});
+	$self->_ApplyCommonOptions($widget,$node->{options}{values});
 	$self->{widgets}{$node->{name}}=$widget;
 	return $widget;
+}
+
+# The options legacy ApplyCommonOptions (gmusicbrowser_layout.pm:1239) applies to
+# both boxes and widgets. Only the size request is portable: hover_layout needs a
+# popup window and its own GdkWindow, neither of which is ported.
+# The read-then-merge order is the legacy one, so a widget that already requested
+# a size of its own keeps whichever dimension the layout did not override. Both
+# toolkits spell an unset dimension -1, so the merge carries over unchanged.
+sub _ApplyCommonOptions
+{	my ($self,$widget,$values)=@_;
+	return unless $values->{minwidth} || $values->{minheight};
+	my ($minwidth,$minheight)=$widget->get_size_request;
+	$minwidth=  $values->{minwidth}  || $minwidth;
+	$minheight= $values->{minheight} || $minheight;
+	$widget->set_size_request($minwidth,$minheight);
 }
 
 # A stateless button: one command, an icon from the widget's default 'stock'

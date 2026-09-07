@@ -10,8 +10,9 @@ make test-modernization
 
 This runs the neutral layout parser, frontend contract and lifecycle, legacy
 adapter and lifecycle integration, and GTK4 renderer contract tests. On
-2026-09-07, after the `Next`/`Prev` increment, it reported 298 executed
-assertions passed and no skips, up from 269 before it. The
+2026-09-07, after the `Filler` and size-request increment, it reported 315
+executed assertions passed and no skips, up from 298 after `Next`/`Prev` and
+269 before that. The
 renderer test uses small in-process GTK doubles; it proves the
 parser/renderer/command wiring without claiming that a real GTK4 binding or
 display passed.
@@ -69,12 +70,12 @@ The action test uses [cycle-handle-focus](https://docs.gtk.org/gtk4/signal.Paned
 before [move-handle](https://docs.gtk.org/gtk4/signal.Paned.move-handle.html).
 
 `t/gtk4/30_Box.t` adds real `HB`/`VB` packing geometry to the runner. On
-2026-09-07, after the `Next`/`Prev` increment, the full `make test-gtk4` run
-reported 184 TAP results: 178 executed assertions passed and the same six
-feasibility probes were skipped, 0 failures. The skips were counted from
-`prove -v` and are the same six M1 probes as before. Before the increment the
-same command reported 173 results, comprising 167 executed assertions and those
-six skips. The box file contributes 34 executed assertions and the icon file 44.
+2026-09-07, after the `Filler` and size-request increment, the full
+`make test-gtk4` run reported 202 TAP results: 196 executed assertions passed
+and the same six feasibility probes were skipped, 0 failures. The skips were
+counted from `prove -v` and are the same six M1 probes as before. Running
+totals for the same command: 173 results before `Next`/`Prev`, 184 after it,
+202 now. The box file contributes 52 executed assertions and the icon file 44.
 They read allocated child offsets with
 [translate_coordinates](https://docs.gtk.org/gtk4/method.Widget.translate_coordinates.html);
 `compute_bounds` and `compute_point` are unusable through this binding, which
@@ -189,6 +190,57 @@ because D022 makes stock GNOME a required target.
 With `icon_path` omitted or pointing at a missing directory, rendering still
 succeeds: standard names resolve, bundled names return nothing and the widget
 keeps its text label.
+
+## `Filler` and the legacy size request
+
+`t/layouts/sizing.layout` is the fixture. Note that a container's own options
+go after the `=` in the legacy syntax — `VBroot= (minwidth=320) ...`, as
+`gmusicbrowser_layout.pm:1001` reads them — not on the container name; writing
+`VBroot(minwidth=320)=` silently produces a layout with two roots instead.
+
+Measured on real Wayland in a 600x300 window, `direction=ltr`:
+
+| Widget | Allocation | Size request | Note |
+|---|---|---|---|
+| `VBroot` | 600x300 | `320,-1` | container `minwidth` |
+| `HBfillers` | 600x21 | `-1,-1` | natural row height |
+| `Filler` (`_`) | 564x21 | `-1,-1` | absorbs the free space |
+| `Filler2` (`4`) | 0x21 | `-1,-1` | `margin_start` 4, no width of its own |
+| `HBsized` | 600x40 | `-1,-1` | raised by its tallest child |
+| `Filler3` | 120x40 | `120,-1` | entirely from `minwidth` |
+| `Label4` | 90x40 | `90,30` | natural width is ~9px |
+| `Label5` | 21x40 | `-1,40` | `minheight` only |
+
+`Filler3` is the clearest case: an empty box has no natural size at all, so its
+120px is produced solely by the size request. `Label4` is widened tenfold past
+its natural width, and `HBsized` is 40px tall against `HBfillers`' 21px because
+one child declared `minheight=40`.
+
+Asserting a container's *allocated* width against its `minwidth` would be
+vacuous in a 600px window, and a mapped Wayland window cannot be shrunk below
+it: `set_size_request` raises a minimum but never lowers a size the compositor
+already granted — the counterpart of the `set_default_size` limitation recorded
+above. The assertions therefore use `measure('horizontal',-1)`, which returns
+`(minimum, natural, min_baseline, nat_baseline)`, and include a control on a
+sibling row with no `minwidth` so the comparison discriminates.
+
+Both halves are behaviour, not construction. Against a pristine `git archive`
+of the preceding commit the offline `t/04_Gtk4LayoutRenderer.t` dies at
+`t/layouts/sizing.layout:4: GTK4 widget 'Filler' is not implemented`. Adding
+only `Filler` to that pristine copy, so the sizing assertions are reached and
+judged on their own merit, then fails 4 offline assertions and aborts on the
+missing `_ApplyCommonOptions`; on real Wayland `t/gtk4/30_Box.t` fails 8 of 52,
+while the sibling-row control correctly passes on both trees.
+
+GTK3 comparison for the merge semantics: a GTK3 probe confirmed that a fresh
+widget reports `get_size_request` as `(-1,-1)`, that `set_size_request(120,-1)`
+reads back as `(120,-1)`, and that `ApplyCommonOptions` with `minwidth=80`
+alone calls `set_size_request(80,-1)`. GTK4 through this binding behaves
+identically, which is why the legacy read-then-merge is ported unchanged rather
+than reimplemented.
+
+`hover_layout`, the other half of `ApplyCommonOptions`, is not ported and has
+no test: it needs a popup window and a widget with its own `GdkWindow`.
 
 The symbolic fallback is a behaviour change, not a construction detail. Run
 against the previous `_IconName` in a scratch copy of the tree,

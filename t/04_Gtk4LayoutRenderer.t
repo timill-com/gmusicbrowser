@@ -35,6 +35,14 @@ use lib '.';
 	sub set_margin_end { $_[0]{margin_end}=$_[1] }
 	sub set_margin_top { $_[0]{margin_top}=$_[1] }
 	sub set_margin_bottom { $_[0]{margin_bottom}=$_[1] }
+	# real GTK spells an unset dimension -1, and _ApplyCommonOptions merges
+	# against whatever is already requested, so the double must do the same
+	sub get_size_request
+	{	my $self=shift;
+		return (defined $self->{req_width} ? $self->{req_width} : -1,
+			defined $self->{req_height} ? $self->{req_height} : -1);
+	}
+	sub set_size_request { @{$_[0]}{qw/req_width req_height/}=@_[1,2] }
 }
 {	package Gtk4::Box;
 	our @ISA=('Gtk4::Widget::Double');
@@ -409,5 +417,48 @@ is($brenderer->Widget('Prev2')->{tooltip},'Recently played songs','an unhandled 
 
 $brenderer->Destroy;
 is_deeply($brenderer->Unhandled,{},'teardown clears the unhandled report');
+
+# Filler and the legacy ApplyCommonOptions size request. Both toolkits spell an
+# unset dimension -1, so the legacy read-then-merge carries over unchanged.
+my $sizing=File::Spec->catfile('t','layouts','sizing.layout');
+my $zcatalog=Layout::Parser::ParseFiles(files=>[$sizing]);
+is(scalar @{$zcatalog->{diagnostics}},0,'sizing fixture parses without diagnostics');
+my $zrenderer=Layout::Renderer::Gtk4->new
+(	catalog=>$zcatalog,
+	frontend=>$frontend,
+	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
+);
+my $zroot=$zrenderer->Render('gtk4 sizing');
+
+# Filler is an empty horizontal box, matching legacy Gtk3::HBox->new
+my $filler=$zrenderer->Widget('Filler');
+isa_ok($filler,'Gtk4::Box');
+is($filler->{orientation},'horizontal','Filler is a horizontal box like the legacy one');
+is(scalar @{$filler->{children}},0,'Filler holds no children');
+is($filler->{label},undef,'Filler carries no text of its own');
+
+# a Filler earns its space from the packing prefix, exactly as any other child
+is($filler->{hexpand},1,'an expanding Filler sets hexpand on the packing axis');
+is($zrenderer->Widget('Filler2')->{hexpand},0,'a plain Filler does not expand');
+is($zrenderer->Widget('Filler2')->{margin_start},4,'a padded Filler pads the packing axis');
+is($zrenderer->Widget('Filler2')->{margin_top},undef,'Filler padding leaves the cross axis alone');
+
+# minwidth/minheight reach every widget, not just buttons
+is_deeply([$zrenderer->Widget('Filler3')->get_size_request],[120,-1],'minwidth alone leaves height unset');
+is_deeply([$zrenderer->Widget('Label4')->get_size_request],[90,30],'minwidth and minheight both apply');
+is_deeply([$zrenderer->Widget('Label5')->get_size_request],[-1,40],'minheight alone leaves width unset');
+is_deeply([$zrenderer->Widget('Text')->get_size_request],[-1,-1],'a widget with neither option is left unrequested');
+# and containers, matching the second legacy call site
+is_deeply([$zroot->get_size_request],[320,-1],'a container honours minwidth');
+is_deeply([$zrenderer->Widget('HBfillers')->get_size_request],[-1,-1],'a container with no size option is left unrequested');
+
+# the merge must not clobber a dimension the layout did not name
+$zrenderer->Widget('Label5')->set_size_request(55,40);
+$zrenderer->_ApplyCommonOptions($zrenderer->Widget('Label5'),{minheight=>70});
+is_deeply([$zrenderer->Widget('Label5')->get_size_request],[55,70],'merging a later minheight keeps the existing width');
+
+# sizing options are handled, so they are not reported as ignored
+is($zrenderer->Unhandled('Label4'),undef,'a sizing option is not reported as unhandled');
+$zrenderer->Destroy;
 
 done_testing;

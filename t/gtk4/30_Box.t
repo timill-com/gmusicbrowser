@@ -169,4 +169,65 @@ $renderer->Destroy;
 $window->destroy;
 _drain();
 
+# Filler and the legacy ApplyCommonOptions size request, measured as real
+# allocations. Construction alone cannot satisfy these: minwidth has to change
+# what GTK gives the child.
+{	my $sfixture=File::Spec->catfile('t','layouts','sizing.layout');
+	my $scatalog=Layout::Parser::ParseFiles(files=>[$sfixture]);
+	is(scalar @{$scatalog->{diagnostics}},0,'sizing fixture parses without diagnostics');
+	my $srenderer=Layout::Renderer::Gtk4->new
+	(	catalog=>$scatalog,
+		frontend=>$frontend,
+		labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
+	);
+	my $sroot=$srenderer->Render('gtk4 sizing');
+	$sroot->set_direction('ltr');
+	my $swindow=Gtk4::Window->new;
+	$swindow->set_default_size(600,300);
+	$swindow->set_child($sroot);
+	$swindow->present;
+	ok(_wait_for_window($swindow),'GTK4 window mapped before sizing assertions');
+	_drain();
+
+	# a Filler is an empty box: it draws nothing but occupies real space
+	my $filler=$srenderer->Widget('Filler');
+	isa_ok($filler,'Gtk4::Box');
+	is($filler->get_orientation,'horizontal','Filler is a horizontal box like the legacy one');
+	is($filler->get_first_child,undef,'Filler has no child widget');
+	cmp_ok($filler->get_width,'>',100,'an expanding Filler absorbs the free space');
+	my $plain=$srenderer->Widget('Filler2');
+	cmp_ok($plain->get_width,'<=',1,'a Filler with no expand takes no width of its own');
+	is($plain->get_margin_start,4,'a padded Filler pads the packing axis');
+	is($plain->get_margin_top,0,'Filler padding leaves the cross axis alone');
+
+	# minwidth becomes a real minimum, for a widget with no natural size of its
+	# own and for one that has one
+	my $sized=$srenderer->Widget('Filler3');
+	cmp_ok($sized->get_width,'>=',120,'minwidth gives an empty Filler a real minimum width');
+	my $wide=$srenderer->Widget('Label4');
+	cmp_ok($wide->get_width,'>=',90,'minwidth widens a label past its natural size');
+	cmp_ok($wide->get_height,'>=',30,'minheight raises the same label');
+	my $tall=$srenderer->Widget('Label5');
+	cmp_ok($tall->get_height,'>=',40,'minheight applies without minwidth');
+	# the row must be at least as tall as its tallest declared minimum
+	my $row=$srenderer->Widget('HBsized');
+	cmp_ok($row->get_height,'>=',40,'a minheight child raises its whole row');
+	# The container's own minwidth. Asserting the allocated width would be
+	# vacuous, because the 600px window satisfies >=320 with no request at all,
+	# and a mapped Wayland window cannot be shrunk under it: set_size_request
+	# raises a minimum but never lowers a size the compositor already gave.
+	# measure() reports the minimum itself, which is the actual property.
+	is_deeply([$sroot->get_size_request],[320,-1],'a container carries its minwidth as a size request');
+	my ($rootmin)=$sroot->measure('horizontal',-1);
+	cmp_ok($rootmin,'>=',320,'the container measures a minimum width of at least its minwidth');
+	my ($fillmin)=$srenderer->Widget('HBfillers')->measure('horizontal',-1);
+	cmp_ok($fillmin,'<',320,'a sibling row with no minwidth measures a smaller minimum');
+	my ($sizedmin)=$sized->measure('horizontal',-1);
+	is($sizedmin,120,'an empty Filler measures exactly the minwidth it was given');
+
+	$srenderer->Destroy;
+	$swindow->destroy;
+	_drain();
+}
+
 done_testing;

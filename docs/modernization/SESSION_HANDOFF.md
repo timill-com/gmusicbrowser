@@ -1,9 +1,9 @@
 # Session handoff
 
-Status: `HEAD` is `4ed26ad` "gtk4: render the Stop widget from a stateless
-button table". Uncommitted on top of it: the `Next`/`Prev` increment, which
-includes the first shared-boundary change of the port and a working GTK3
-regression smoke.
+Status: `HEAD` is `6d30dcf` "gtk4: render the Next and Prev widgets", which
+also added the first shared-boundary change of the port and a working GTK3
+regression smoke. Uncommitted on top of it: `Filler` plus the legacy
+`ApplyCommonOptions` size request.
 
 Last session: 2026-09-07. Branch `gtk4-alpha`.
 
@@ -26,44 +26,45 @@ otherwise from the size of the planning documents.
 
 ## What is committed and what is not
 
-Everything through the `Stop` widget is committed; `HEAD` is `4ed26ad` and
-`gtk4-alpha` is six commits past `master`.
+Everything through `Next`/`Prev` is committed; `HEAD` is `6d30dcf` and
+`gtk4-alpha` is seven commits past `master`.
 
-Uncommitted in the tree is the `Next`/`Prev` increment:
+Uncommitted in the tree is the `Filler` and size-request increment:
 
-	M Makefile
 	M docs/modernization/DECISIONS.md
 	M docs/modernization/PARITY_CHECKLIST.md
 	M docs/modernization/SESSION_HANDOFF.md
 	M docs/modernization/TESTING.md
-	M gmusicbrowser_frontend_legacy.pm
-	M gmusicbrowser_gtk4.pl
 	M gmusicbrowser_gtk4_layout.pm
 	M t/04_Gtk4LayoutRenderer.t
-	M t/05_FrontendLegacy.t
-	M t/06_LifecycleLegacy.t
-	M t/gtk4/20_Paned.t
 	M t/gtk4/30_Box.t
-	M t/gtk4/40_Icons.t
-	M t/layouts/buttons.layout
-	?? tools/run-gtk3-smoke
+	?? t/layouts/sizing.layout
 
-No GTK3 production code, bundled layout, or file in `pix/` has been touched.
-`gmusicbrowser.pl` is unmodified. `tools/run-gtk3-smoke` is the only added
-file this session; `t/layouts/buttons.layout` was added by the previous one.
+No GTK3 production code, bundled layout, or file in `pix/` has been touched by
+either increment. `gmusicbrowser.pl` is unmodified.
 
 ## Renderer widget state
 
 Widget elements implemented: `Label`, `Text`, `Play`, `Quit`, `Stop`, `Next`,
-`Prev` — 7 of the ~100 in the layout compatibility surface. This is still the
-real bottleneck: containers cover 8 of 15 types and are well ahead of anything
-to put in them.
+`Prev`, `Filler` — 8 of the ~100 in the layout compatibility surface. This is
+still the real bottleneck: containers cover 8 of 15 types and are well ahead of
+anything to put in them.
+
+By instance count in the bundled layouts, `Filler` (102) is the second
+most-used element in the whole layout system after `MenuItem` (103). It is now
+implemented, so the note in earlier handoffs that "a fixture needing an
+expanding filler must use `Text`, not the legacy `Filler`" no longer applies.
 
 The three `%Buttons` entries (`Prev`, `Stop`, `Next`) exhaust the stateless
 transport buttons whose commands the bridge exposes. Adding another means
 either widening `@Commands` again — now a proven, cheap operation with
 `make test-gtk3` available — or implementing a stateful button, which needs a
 state getter and an event subscription the way `Play` does.
+
+`minwidth=`/`minheight=` now reach every widget and container, through
+`_ApplyCommonOptions`, which is the legacy `ApplyCommonOptions` size request
+ported at both of the call sites GTK3 uses. That was a correctness gap
+affecting every widget already rendered, not just new ones.
 
 ## Renderer container state, carried forward
 
@@ -88,7 +89,63 @@ which reproduces both groups' legacy order including interleaved `-a b -c d`.
 exists yet. `_CreatePaned` implements `PanedPack`, and `_CreateSingle` covers
 `SB`, `FR`, `EB`, `AB`, and `WB`.
 
-## This session: `Next` and `Prev`, and the first shared-boundary change
+## This session, second increment: `Filler` and the legacy size request
+
+Two things, both pure-layout with no shared-boundary change.
+
+`Filler` is the legacy `Gtk3::HBox->new` (`gmusicbrowser_layout.pm:421`), so
+GTK4 builds it as an empty `Gtk4::Box`. Worth doing because it is the second
+most-used element in the bundled layouts — 102 instances — and because it
+carries no options anywhere: every use is driven purely by its packing prefix,
+which `_CreateBox` already translates. Measured on real Wayland, an expanding
+`Filler` takes 564 of 600px while a plain one is allocated 0px with its
+declared padding intact.
+
+`_ApplyCommonOptions` is the more valuable half. Legacy `ApplyCommonOptions`
+(`gmusicbrowser_layout.pm:1239`) runs on **every** widget and container, and
+the GTK4 renderer did not implement it at all — so `minwidth=` (52 uses) and
+`minheight=` (7) were being silently dropped for every widget already
+rendered. It is now applied at both of the legacy call sites: `:1013` for
+containers and `:1178` for widgets.
+
+The legacy read-then-merge order is preserved verbatim, so a widget that
+already requested a size of its own keeps whichever dimension the layout did
+not name. That is safe because a GTK3 probe confirmed both toolkits spell an
+unset dimension `-1` and that `minwidth=80` alone produces
+`set_size_request(80,-1)` in each. This was verified rather than assumed.
+
+`hover_layout`, the other half of `ApplyCommonOptions`, is deliberately not
+ported: it needs a popup window and a widget with its own `GdkWindow`.
+
+`maxwidth=` (44 uses) and `maxheight=` (7) were considered and left out. They
+are not general options — in GTK3 they feed `Layout::Label`'s `expand_max`
+ellipsize and scrolling machinery (`:3126`, `:3209`), so they belong with a
+real `Layout::Label` port, not with a size request.
+
+### Two traps this increment hit
+
+- **A container's options go after the `=`.** The legacy syntax is
+  `VBroot= (minwidth=320) ...`, read at `gmusicbrowser_layout.pm:1001`. Writing
+  `VBroot(minwidth=320)=` does not error; the parser simply does not recognise
+  `VBroot` as a container declaration, and the layout ends up with two roots,
+  which `Render` then rejects.
+- **`set_size_request` cannot shrink a mapped Wayland window.** It raises a
+  minimum but never lowers a size the compositor already granted, which is the
+  counterpart of the recorded `set_default_size` limitation. An assertion that
+  a container is allocated at least its `minwidth` is therefore vacuous in a
+  600px window and *passes against pristine*. Use `measure($orientation,-1)`,
+  which returns `(minimum, natural, min_baseline, nat_baseline)` and marshals
+  correctly through this binding, and add a control on a sibling with no
+  `minwidth` so the comparison discriminates. Both are recorded in D006.
+
+### Also corrected
+
+`Text` was still listed as **Not started** in the parity checklist's widget
+inventory even though it has been implemented since the proof slice. That is a
+pre-existing documentation gap, now fixed. `Prev` was likewise missing from
+that inventory entirely before the previous increment.
+
+## This session, first increment: `Next` and `Prev`, and the first shared-boundary change
 
 `Next` and `Prev` are now rendered, and `@Commands` in
 `gmusicbrowser_frontend_legacy.pm` was widened to expose `NextSong` and
@@ -342,10 +399,22 @@ The icon assertions are behaviour, not construction. Against the previous
 `application-exit` and `view-refresh` where Adwaita can render only the
 symbolic spellings.
 
-The `Next`/`Prev` assertions cannot pass against the previous tree either. The
-proof was run by extracting `git archive HEAD` to a scratch directory — the
-whole tree, so no file is missing — and overlaying only the changed test files
-and the fixture:
+The `Filler` and size-request assertions cannot pass against the previous tree.
+Extracting `git archive HEAD` to a scratch directory and overlaying only the
+changed test files and `t/layouts/sizing.layout`, the offline
+`t/04_Gtk4LayoutRenderer.t` dies at
+`t/layouts/sizing.layout:4: GTK4 widget 'Filler' is not implemented`. Because
+that abort hides the sizing assertions, the proof was repeated with **only**
+`Filler` added to the pristine copy, so those assertions are reached and judged
+on their own merit: 4 offline assertions then fail and the file aborts on the
+missing `_ApplyCommonOptions`, and on real Wayland `t/gtk4/30_Box.t` fails **8
+of 52**. The sibling-row control (`a sibling row with no minwidth measures a
+smaller minimum`) correctly passes on both trees, so the comparison
+discriminates rather than merely failing everything.
+
+The `Next`/`Prev` assertions cannot pass against the tree before them either.
+The proof was run the same way, overlaying only the changed test files and the
+fixture on a pristine archive:
 
 - `t/04_Gtk4LayoutRenderer.t` and `t/gtk4/40_Icons.t` both die at
   `t/layouts/buttons.layout:4: GTK4 widget 'Prev' is not implemented`.
@@ -362,7 +431,8 @@ Commands that were actually run and passed this session:
 	perl -I. -c gmusicbrowser_gtk4_layout.pm
 	perl -I. -c gmusicbrowser_gtk4.pl
 	perl -I. -c t/04_Gtk4LayoutRenderer.t t/05_FrontendLegacy.t \
-	      t/06_LifecycleLegacy.t t/gtk4/40_Icons.t     # one file per invocation
+	      t/06_LifecycleLegacy.t t/gtk4/30_Box.t t/gtk4/40_Icons.t
+	                                             # one file per invocation
 	sh -n tools/run-gtk3-smoke
 	prove --norc -I. t/02_LayoutParser.t t/03_FrontendContract.t \
 	      t/04_Gtk4LayoutRenderer.t t/05_FrontendLegacy.t t/06_LifecycleLegacy.t
@@ -371,15 +441,18 @@ Commands that were actually run and passed this session:
 	make test-gtk3
 	git diff --check
 
-`make test-modernization`: **298** executed assertions passed, no skips, up
-from 269. The skip count was read from `prove -v`, not assumed.
+`make test-modernization`: **315** executed assertions passed, no skips. Running
+totals: 269 at the start of the session, 298 after `Next`/`Prev`, 315 now. The
+skip count was read from `prove -v`, not assumed.
 
-`make test-gtk4` on the real Wayland connection: **184** TAP results,
-comprising **178 executed assertions passed** and the same six pre-existing M1
+`make test-gtk4` on the real Wayland connection: **202** TAP results,
+comprising **196 executed assertions passed** and the same six pre-existing M1
 feasibility probes skipped, 0 failures. Per file: 18 binding (which is where
-all six skips live), 4 proof-of-life, 84 pane, 34 box, 44 icon. Do not restate
-this as 184 passing assertions. The six skips were counted from `prove -v`
-output run through a copy of the runner in a scratch directory, not assumed.
+all six skips live), 4 proof-of-life, 84 pane, 52 box, 44 icon. Running totals
+for the same command: 173 at the start of the session, 184 after `Next`/`Prev`,
+202 now. Do not restate this as 202 passing assertions. The six skips were
+counted from `prove -v` output run through a copy of the runner in a scratch
+directory, not assumed.
 
 `make test-gtk3`: 1 assertion passed on the real Wayland connection, and the
 same command passed identically against a pristine `git archive` of HEAD with
@@ -399,8 +472,11 @@ four resize policies. Box tests exercise allocated offsets and widths for
 mixed, interleaved, and expand/fill rows in both axes. Physical pointer and
 keyboard input is not covered by either.
 
-GTK3 regression status for this session: **shared code did change**, so the
-"cannot be affected" reasoning used by previous sessions does not apply here.
+GTK3 regression status for this session: the `Filler`/size-request increment
+touches only `gmusicbrowser_gtk4_layout.pm`, so no shared code changed there,
+but `make test-gtk3` was run anyway and passed. The `Next`/`Prev` increment
+**did** change shared code, so the "cannot be affected" reasoning used by
+previous sessions does not apply to it.
 `@Commands` in `gmusicbrowser_frontend_legacy.pm` is on the shared boundary,
 and widening it makes the bridge require `NextSong` and `PrevSong` at
 construction — so the failure mode is a GTK3 startup abort at
@@ -533,23 +609,33 @@ means the reported ~1190px window is not the layout's designed size.
 
 ## Suggested next steps
 
-0. **Highest-value cleanup, now overdue:** extract the `labels` hash into a
+1. **Highest-value cleanup, now overdue:** extract the `labels` hash into a
    test fixture constant. It is duplicated at eleven test call sites plus
    `gmusicbrowser_gtk4.pl`, and every future tooltip-bearing widget touches all
-   twelve. Deliberately not bundled with this increment.
-1. Keep running `make test-gtk4` on the real Wayland connection with the system
+   twelve. Deliberately not bundled with either increment this session.
+2. Next widget candidates, by instance count, excluding menus: `FilterPane`
+   (75), `Window` (39), `SimpleSearch` (38), `ToggleButton` (38).
+   `ToggleButton` is the most tractable: it is a `Layout::Button` variant with
+   `toggle` state, so it reuses `%Buttons` and `_SetIcon` and would exercise
+   the two-state `stock="on:... off:..."` form that `LockAlbum`/`LockArtist`
+   also need. `Window` is a container-level concept and probably belongs with
+   `@layout` embedding. `MenuItem` (103) and `SeparatorMenuItem` (32) are the
+   two most-used elements overall but are the `GMenu`/`PopoverMenu` design
+   change — **ask the user first.**
+3. Keep running `make test-gtk4` on the real Wayland connection with the system
    packages, outside the execution sandbox when needed. Count explicit skips.
    Also run `make test-gtk3` after any shared-code change; it works now.
-2. Write the `DECISIONS.md` entries for `AB` and `WB`. These are the oldest
+4. Write the `DECISIONS.md` entries for `AB` and `WB`. These are the oldest
    outstanding item and they block those two rows from ever reaching parity.
-   **Still not done.** This session did the D006 note and the symbolic
-   fallback instead; `AB`/`WB` remain approximations and must not be advanced
-   to parity until their entries are accepted.
-3. Add a D006 evidence note about graphene types. **Done this session.** D006
-   now records the graphene marshalling failure, the `->can` segfault, the
-   widget-before-`Gtk4::init` segfault, the empty-string boolean artifact, and
-   the `set_theme_name` display-singleton refusal.
-4. Move D023 from Proposed to Accepted, or push back on it, before more
+   **Still not done, now four sessions running.** `AB` remains alignment
+   properties on its child and `WB` a plain box; both are approximations and
+   must not be advanced to parity until their entries are accepted.
+5. D006 binding evidence. **Already recorded, keep extending it.** D006 now
+   holds the graphene marshalling failure, the `->can` segfault, the
+   widget-before-`Gtk4::init` segfault, the empty-string boolean artifact, the
+   `set_theme_name` display-singleton refusal, and this session's
+   `get_size_request`/`set_size_request`/`measure` findings.
+6. Move D023 from Proposed to Accepted, or push back on it, before more
    icon-bearing widgets are added. D024 is now in the same position: both are
    Proposed and both concern icon resolution, so decide them together.
    **New evidence for D024 this session:** `Next` and `Prev` are its first
@@ -558,15 +644,15 @@ means the reported ~1190px window is not the layout's designed size.
    would render as text on stock GNOME, a D022 target.
    Decide also whether to propose mapping `gmb-*` to freedesktop names, which
    D023 alternative 2 currently defers and which this session did not do.
-5. Investigate the queue clipping properly: make `QueueList` propagate a
+7. Investigate the queue clipping properly: make `QueueList` propagate a
    minimum width from its configured columns. See the dead-end section above
    before touching `layouts/shimmer.layout`; the obvious `+` fix is disproven.
-6. Integrate renderer saved options with an isolated configuration round trip,
+8. Integrate renderer saved options with an isolated configuration round trip,
    then compare physical pane input and accessibility against GTK3.
-7. Consider right-to-left packing. GTK4 `insert_child_after` is direction
+9. Consider right-to-left packing. GTK4 `insert_child_after` is direction
    independent, but the legacy far-edge meaning of `-` is not, and no bundled
    layout has been checked under `rtl`.
-8. Then menus, `SM`/`MB`/`BM`, 54 uses. **Do not start these without asking the
+10. Then menus, `SM`/`MB`/`BM`, 54 uses. **Do not start these without asking the
    user first.** GTK4 replaced `GtkMenu` with `GMenu` and `PopoverMenu` models,
    so this is a design change rather than mechanical translation, and
    `plugins/appindicator.pm` is explicitly marked "do not port its GTK3 menu".
@@ -600,9 +686,9 @@ means the reported ~1190px window is not the layout's designed size.
   `fill` as explicit `0`/`1`. `$opt=~m/_/` yields `''` for no match, and this
   introspection binding mishandles the empty string, producing allocations
   that look like a packing bug but are a probe artifact.
-- Only `Label`, `Text`, `Play`, and `Quit` widget elements exist in the GTK4
-  renderer. A fixture needing an expanding filler must use `Text`, not the
-  legacy `Filler` widget.
+- Widget elements in the GTK4 renderer: `Label`, `Text`, `Play`, `Quit`,
+  `Stop`, `Next`, `Prev`, `Filler`. The earlier note that an expanding filler
+  must use `Text` because `Filler` does not exist no longer applies.
 - The GTK3 reference geometry is best obtained by extracting `BoxPack` from
   `gmusicbrowser_layout.pm` with a regex and `eval`, so the comparison uses
   production code rather than a copy. That module is not standalone
@@ -656,6 +742,24 @@ means the reported ~1190px window is not the layout's designed size.
 - A fixture with several top-level containers gives the parser several roots,
   and `Render` requires exactly one. Nest the extra containers by naming them
   as children of the root, as `t/layouts/buttons.layout` does.
+- A container's own options go **after** the `=`: `VBroot= (minwidth=320) ...`,
+  which is what `gmusicbrowser_layout.pm:1001` reads. `VBroot(minwidth=320)=`
+  does not error — the parser just stops seeing `VBroot` as a container
+  declaration, and the layout silently ends up with an extra root.
+- `set_size_request` raises a minimum on a mapped Wayland window but cannot
+  shrink it, the counterpart of the `set_default_size` limitation. So an
+  assertion that a widget is *allocated* at least its `minwidth` is vacuous in
+  a window already wider than that, and will pass against a renderer that
+  ignores the option entirely. Assert the minimum itself with
+  `measure($orientation,-1)`, which returns
+  `(minimum, natural, min_baseline, nat_baseline)`, and pair it with a control
+  on a sibling that has no such option.
+- `get_size_request` returns `-1` for an unset dimension in both GTK3 and GTK4
+  through this binding, which is why the legacy `ApplyCommonOptions`
+  read-then-merge ports unchanged. Verified against GTK3, not assumed.
+- The offline doubles in `t/04_Gtk4LayoutRenderer.t` must reproduce the `-1`
+  unset convention, not `0`/`undef`, or a merge test passes for the wrong
+  reason.
 - `Layout::Button` shows the widget-table `text` only when `with_text` is set
   (`gmusicbrowser_layout.pm:3047`) or when there is no `stock` at all (3062).
   For `Next` and `Prev`, which both have a `stock` default, `_"Next"` and

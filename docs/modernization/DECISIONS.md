@@ -140,6 +140,15 @@ Evidence recorded so far, against the system
   `set_theme_name` is refused with an `is_display_singleton` assertion and
   silently leaves the theme unchanged. Testing icon resolution against a
   specific theme requires `Gtk4::IconTheme->new`.
+- `get_size_request` and `set_size_request` work and agree with GTK3: an unset
+  dimension is `-1` in both toolkits, so the legacy `ApplyCommonOptions`
+  read-then-merge can be ported unchanged.
+- `set_size_request` on a mapped Wayland window raises a minimum but cannot
+  lower a size the compositor already granted, so a window cannot be shrunk in
+  a test. This is the counterpart of the `set_default_size` limitation already
+  recorded for `t/gtk4/20_Paned.t`. Assert a widget's minimum through
+  `measure($orientation,-1)`, which returns
+  `(minimum, natural, min_baseline, nat_baseline)` and marshals correctly.
 
 ## D007 — Canonical application ID
 

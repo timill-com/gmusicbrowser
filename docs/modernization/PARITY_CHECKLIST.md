@@ -38,10 +38,11 @@ surface. Numeric suffixes retain the base element's behaviour.
 
 | Elements | GTK4 status |
 |---|---|
-| `Label`, `Play`, `Quit`, `Stop`, `Next`, `Prev` | GTK4 in progress |
+| `Label`, `Text`, `Play`, `Quit`, `Stop`, `Next`, `Prev`, `Filler` | GTK4 in progress |
+| `minwidth=`/`minheight=` on any widget or container | GTK4 in progress |
 | Icon options (`icon=`, `stock=`) on the above | GTK4 in progress, see D023 |
 | `tip=` tooltip option on the above | GTK4 in progress, literal tips only |
-| `AABox`, `AASearch`, `AddLabelEntry`, `Album`, `AlbumBox`, `AlbumSearch`, `Artist`, `ArtistBox`, `ArtistPic`, `ArtistSearch`, `BContext`, `Button`, `Choose`, `ChooseRandAlbum`, `Comment`, `Connections`, `Context`, `Cover`, `Date`, `EditList`, `EditListButtons`, `EmptyList`, `Equalizer`, `EqualizerPresets`, `EqualizerPresetsSimple`, `EventBox`, `FBox`, `FLock`, `FPane`, `Filler`, `Filter`, `FilterBox`, `FilterLock`, `FilterPane`, `Fullscreen`, `HSeparator`, `HistItem`, `LSortItem`, `LabelTime`, `LabelToggleButtons`, `LabelVol`, `LabelsIcons`, `LayoutItem`, `Length`, `Lock`, `LockAlbum`, `LockArtist`, `LockSong`, `MainMenuItem`, `MenuItem`, `OpenBrowser`, `OpenContext`, `OpenQueue`, `PFilterItem`, `PSortItem`, `PictureBrowser`, `PlayFilter`, `PlayItem`, `PlayList`, `PlayOrderCombo`, `PlayingTime`, `Pos`, `Pref`, `Progress`, `ProgressV`, `Queue`, `QueueActions`, `QueueFilter`, `QueueItem`, `QueueList`, `Refresh`, `Repeat`, `ResetFilter`, `Scale`, `SeparatorMenuItem`, `ShuffleList`, `SimpleSearch`, `SongInfo`, `SongList`, `SongSearch`, `SongTree`, `Sort`, `Stars`, `TabbedLists`, `Text`, `Time`, `TimeBar`, `TimeSlider`, `Title`, `Title_by`, `TogButton`, `ToggleButton`, `Total`, `VProgress`, `VSeparator`, `Visuals`, `Vol`, `VolBar`, `VolSlider`, `Volume`, `VolumeBar`, `VolumeIcon`, `VolumeSlider`, `Year` | Not started |
+| `AABox`, `AASearch`, `AddLabelEntry`, `Album`, `AlbumBox`, `AlbumSearch`, `Artist`, `ArtistBox`, `ArtistPic`, `ArtistSearch`, `BContext`, `Button`, `Choose`, `ChooseRandAlbum`, `Comment`, `Connections`, `Context`, `Cover`, `Date`, `EditList`, `EditListButtons`, `EmptyList`, `Equalizer`, `EqualizerPresets`, `EqualizerPresetsSimple`, `EventBox`, `FBox`, `FLock`, `FPane`, `Filter`, `FilterBox`, `FilterLock`, `FilterPane`, `Fullscreen`, `HSeparator`, `HistItem`, `LSortItem`, `LabelTime`, `LabelToggleButtons`, `LabelVol`, `LabelsIcons`, `LayoutItem`, `Length`, `Lock`, `LockAlbum`, `LockArtist`, `LockSong`, `MainMenuItem`, `MenuItem`, `OpenBrowser`, `OpenContext`, `OpenQueue`, `PFilterItem`, `PSortItem`, `PictureBrowser`, `PlayFilter`, `PlayItem`, `PlayList`, `PlayOrderCombo`, `PlayingTime`, `Pos`, `Pref`, `Progress`, `ProgressV`, `Queue`, `QueueActions`, `QueueFilter`, `QueueItem`, `QueueList`, `Refresh`, `Repeat`, `ResetFilter`, `Scale`, `SeparatorMenuItem`, `ShuffleList`, `SimpleSearch`, `SongInfo`, `SongList`, `SongSearch`, `SongTree`, `Sort`, `Stars`, `TabbedLists`, `Time`, `TimeBar`, `TimeSlider`, `Title`, `Title_by`, `TogButton`, `ToggleButton`, `Total`, `VProgress`, `VSeparator`, `Visuals`, `Vol`, `VolBar`, `VolSlider`, `Volume`, `VolumeBar`, `VolumeIcon`, `VolumeSlider`, `Year` | Not started |
 
 | Container prefix | Legacy meaning | GTK4 status |
 |---|---|---|
@@ -134,6 +135,28 @@ by `LockAlbum`/`LockArtist`. Note that legacy `Layout::Button` defaults are
 default for every button widget rather than rare options. The 28 bundled `gmb-*` names remain app-supplied
 artwork and do not follow the host theme; mapping them to freedesktop names is
 deferred by D023 alternative 2 and has not been proposed for acceptance.
+
+`Filler` is the legacy `Gtk3::HBox->new`, so GTK4 builds it as an empty
+`Gtk4::Box`. It carries no options in any bundled layout: all 102 instances are
+driven purely by their packing prefix, which `_CreateBox` already translates.
+Measured on real Wayland, an expanding `Filler` absorbs 564 of 600px while a
+plain one is allocated 0px with its declared padding intact.
+
+The legacy `ApplyCommonOptions` size request is now applied at both of the
+call sites GTK3 uses — `gmusicbrowser_layout.pm:1013` for containers and
+`:1178` for widgets — so `minwidth=` (52 uses) and `minheight=` (7) reach every
+widget and container the renderer builds, not just buttons. The legacy
+read-then-merge order is preserved, so a widget that already requested a size
+of its own keeps whichever dimension the layout did not name; both toolkits
+spell an unset dimension `-1`, which was verified against GTK3 rather than
+assumed. `hover_layout`, the other half of `ApplyCommonOptions`, is **not**
+ported: it needs a popup window and its own `GdkWindow`.
+
+Still unhandled sizing: `maxwidth=` (44 uses) and `maxheight=` (7). Those are
+not general options — in GTK3 they feed `Layout::Label`'s `expand_max`
+ellipsize and scrolling behaviour (`gmusicbrowser_layout.pm:3126`, `:3209`),
+so they belong with a real `Layout::Label` port rather than with a size
+request.
 
 `AB` and `WB` have no direct GTK4 equivalent: `AB` becomes alignment properties
 on its child and `WB` becomes a

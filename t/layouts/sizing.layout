@@ -1,0 +1,5 @@
+[gtk4 sizing]
+Type=G
+VBroot= (minwidth=320) HBfillers HBsized
+HBfillers= Label(text="a") _Filler Label2(text="b") 4Filler2 Label3(text="c")
+HBsized= Filler3(minwidth=120) Label4(text="wide",minwidth=90,minheight=30) Label5(text="tall",minheight=40) _Text(text="")
