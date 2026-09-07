@@ -10,12 +10,13 @@ make test-modernization
 
 This runs the neutral layout parser, frontend contract and lifecycle, legacy
 adapter and lifecycle integration, and GTK4 renderer contract tests. On
-2026-09-07 it reported 395 executed assertions passed and no skips. Running
-totals: 269 at the start of the previous session, 298 after `Next`/`Prev`, 315
+2026-09-07 it reported 415 executed assertions passed and no skips. Running
+totals: 269 two sessions ago, 298 after `Next`/`Prev`, 315
 after `Filler`, 317 after the shared labels fixture, 325 after the
 `size=`/`relief=` increment, 342 after label alignment/ellipsize, 344 after the
 `ellipsize=1` normalisation, 364 after the `AB` constraint layout, 395 after
-the label `font=`/`color=` CSS. The skip count was read from `prove -v`, not
+the label `font=`/`color=` CSS, 415 after the `DefaultFont`/`DefaultFontColor`
+inheritance. The skip count was read from `prove -v`, not
 assumed. The
 renderer test uses small in-process GTK doubles; it proves the
 parser/renderer/command wiring without claiming that a real GTK4 binding or
@@ -74,17 +75,17 @@ The action test uses [cycle-handle-focus](https://docs.gtk.org/gtk4/signal.Paned
 before [move-handle](https://docs.gtk.org/gtk4/signal.Paned.move-handle.html).
 
 `t/gtk4/30_Box.t` adds real `HB`/`VB` packing geometry to the runner, plus the
-`AB` and label alignment coverage. On 2026-09-07, after the `AB` constraint
-layout, the full
-`make test-gtk4` run reported 304 TAP results: 298 executed assertions passed
+`AB`, label alignment, and label styling coverage. On 2026-09-07, after the
+`DefaultFont`/`DefaultFontColor` inheritance, the full
+`make test-gtk4` run reported 323 TAP results: 317 executed assertions passed
 and the same six feasibility probes were skipped, 0 failures. The skips were
 counted from `prove -v` and are the same six M1 probes as before. Running
 totals for the same command: 173 results before `Next`/`Prev`, 184 after it,
 202 after `Filler`, 216 after the `AB` alignment coverage, 246 after
 `size=`/`relief=`, 258 after label alignment, 261 after the `ellipsize=1`
 normalisation, 287 after the `AB` constraint layout, 304 after the label
-`font=`/`color=` CSS. Per file: 18 binding, which is where all six skips live,
-4 proof-of-life, 84 pane, 124 box, 74 icon.
+`font=`/`color=` CSS, 323 after the inheritance. Per file: 18 binding, which is
+where all six skips live, 4 proof-of-life, 84 pane, 143 box, 74 icon.
 
 The `AB` constraint-layout assertions are behaviour, not construction. Against
 the previous renderer, `t/gtk4/30_Box.t` fails **11 of 107** on real Wayland
@@ -138,6 +139,54 @@ Three things to know before extending them:
   desktop and `rgb(46,52,54)` inside `tools/run-gtk4-smoke`, whose Adwaita
   theme and unset session bus are already recorded. Compare against the
   measured theme colour rather than hard-coding a value.
+
+The `DefaultFont`/`DefaultFontColor` inheritance assertions (D032) are
+behaviour on real Wayland and a mix of behaviour and bookkeeping offline.
+Against the previous renderer, `t/gtk4/30_Box.t` fails **6 of 143** on real
+Wayland and `t/04_Gtk4LayoutRenderer.t` fails **7 of 250** offline. The
+pristine failure values were confirmed to be the right reason: `21 > 21` for
+the inherited font, because the previous renderer draws every label at the
+theme size, and `got rgb(46,52,54) / expected rgb(255,255,255)` for the
+inherited colour.
+
+Four things to know before extending them:
+
+- **The offline comparison needs only the `UnhandledGlobals` accessor stubbed**
+  into the pristine copy, and `_Globals` must be confirmed absent there before
+  the comparison is trusted. Fewer stubs than D031 needed, because the
+  inheritance sits on top of helpers that already exist.
+- **The unstyled baseline comes from a separate layout carrying no globals,**
+  not from another label in the same one. Every label in a layout with a
+  global inherits it, so a within-layout baseline would measure the global
+  against itself. The fixture therefore holds four layouts: one with both
+  globals, one with a grey global (the only inheritance path the offline
+  doubles can assert, since `dim-label` needs no provider), one whose globals
+  are both untranslatable, and one with none.
+- **A "widget overrides the global" assertion is vacuous unless the two labels
+  are compared against each other.** Asserting only that the overriding label
+  lacks `dim-label` passes against a renderer that never applies `dim-label`
+  to anything. This is the same class of trap as D030's two.
+- **Most of the override assertions are controls, not proofs.** The
+  per-widget `font=`/`color=` path already existed, so every assertion about
+  an overriding widget passes on both trees. What discriminates is the four
+  inheriting-label assertions on Wayland and the metadata read, precedence,
+  and reporting assertions offline. Judge each new assertion from `prove -v`
+  individually; the file-level count hides which is which.
+
+The measured values, from a probe inside the runner, with `Text` under
+`DefaultFont=20, DefaultFontColor=white`:
+
+| label | own options | height | colour | classes |
+|---|---|---:|---|---|
+| baseline `Text`, no globals | — | 21 | theme | none |
+| `Text` | — | 41 | `rgb(255,255,255)` | `gmb-font-200`, `gmb-color-white` |
+| `Text2` | `font=8` | 17 | `rgb(255,255,255)` | `gmb-color-white`, `gmb-font-80` |
+| `Text3` | `color=grey` | 41 | theme | `dim-label`, `gmb-font-200` |
+| `Text4` | `font=oops,color=notacolour!` | 21 | theme | none |
+
+`Text2` and `Text3` are what pin the per-option independence: overriding one
+global leaves the other applied. `Text4` is what pins that a widget's own
+refused value does not fall through to the global, matching legacy `||`.
 
 A `font-size` assertion also only discriminates away from the theme size: with
 the desktop at `Roboto 10`, a `10pt` rule measures identically to no rule at

@@ -1377,10 +1377,11 @@ Usage in the bundled layouts, isolated with `[(,] *(font|color)=`:
 | `color=` | 5 | 4 on `Text` in `desktop.layout`, 1 on the drawing layer in `shimmer.layout:132` |
 | `font=` | 4 | `Title`/`Artist`/`Album`/`Date` in `shimmer.layout` |
 
-`desktop.layout` also sets `DefaultFontColor= white` at three scopes and
-`DefaultFont=8`, and `fullscreen.layout` sets `DefaultFont = 20`. Those are
-layout-wide globals read at `gmusicbrowser_layout.pm:971`, so `color=grey`
-there overrides an inherited `white`.
+`desktop.layout` also sets `DefaultFontColor= white` in three of its layouts
+and `DefaultFont=8` in a fourth, and `fullscreen.layout` sets
+`DefaultFont = 20` in both of its. Those are layout-wide globals read at
+`gmusicbrowser_layout.pm:971`, so `color=grey` there overrides an inherited
+`white`. Their inheritance is D032, done after this entry.
 
 Measured through the system binding on GTK 4.14.5, and this is what shaped the
 decision: **the OS theme font and colours already reach the renderer's labels
@@ -1450,9 +1451,8 @@ Alternatives:
 5. Port `DefaultFont`/`DefaultFontColor` inheritance in the same increment.
    Deferred, not rejected: they are layout-wide globals rather than widget
    options, so they belong with a scoped port of layout-level option
-   inheritance. Until then a `Text` inside `desktop.layout` gets its explicit
-   `color=grey` but not the inherited `white`, which is recorded as a gap
-   rather than fixed here.
+   inheritance. **Done as D032**, which reuses this entry's provider and
+   extends the theme-relative exception to a whole-layout scope.
 
 Consequences:
 
@@ -1473,7 +1473,8 @@ Two limits worth stating plainly:
   `get_style_context->get_color`.
 - The four bundled `font=` uses are on `Title`/`Artist`/`Album`/`Date`, none of
   which the renderer builds yet, so `font=` is exercised only by the fixture
-  until those elements land. `color=` on `Text` is reachable today.
+  until those elements land. `color=` on `Text` is reachable today, and so is
+  an inherited `DefaultFontColor` under D032.
 
 Evidence or removal condition:
 
@@ -1498,6 +1499,145 @@ environments — near-white on this desktop, `rgb(46,52,54)` inside
 `tools/run-gtk4-smoke`, whose Adwaita and unset session bus are already
 recorded in D006. Compare against the measured theme colour rather than
 hard-coding one.
+
+## D032 — Layout-wide `DefaultFont`/`DefaultFontColor` are inherited through the same CSS
+
+Status: **Accepted**
+
+Supersedes: D031 alternative 5, which deferred this
+
+Context:
+
+`DefaultFont` and `DefaultFontColor` are layout-wide globals, not widget
+options. Legacy `InitLayout` reads them into `{global_options}`
+(`gmusicbrowser_layout.pm:971`) and `NewWidget` merges that hash into every
+widget's options (`:1162`). The GTK4 renderer never read the parser's
+`{metadata}`, where both land, so a label inheriting either was drawn at the
+theme font and colour.
+
+**Do not infer the precedence from the `:1162` merge order.** `%$global_opt`
+is merged *last*, which reads as though the global wins, but neither option
+actually lets it: `:1163` is `$options{font} ||= $global_opt->{DefaultFont}`
+and `Layout::Label` at `:3120` is `$opt->{color} || $opt->{DefaultFontColor}`.
+Both spell the fallback with `||`, so **a widget's own `font=`/`color=`
+wins**. This was read from production code, and the trap is why it is spelled
+out here.
+
+Usage in the bundled layouts, all six occurrences:
+
+| layout | `Type` | value | reachable today |
+|---|---|---|---|
+| `desktop.layout` `[D_insens_song_cover]` | D | `DefaultFontColor= white` | no |
+| `desktop.layout` `[D_buttons_song_cover]` | D | `DefaultFontColor= white` | no |
+| `desktop.layout` `[D_clementine]` | D | `DefaultFontColor= white` | **yes** |
+| `desktop.layout` `[D_screenlet]` | D | `DefaultFont=8` | no |
+| `fullscreen.layout` `[default fullscreen]` | F | `DefaultFont = 20` | no |
+| `fullscreen.layout` `[Fullscreen simple]` | F | `DefaultFont = 20` | no |
+
+They are three separate `Type=D` layout definitions in `desktop.layout`, not
+nested scopes. `[D_clementine]` is the reachable one: it contains `Text5`, a
+`Text` widget the renderer builds today with no `color=` of its own, so it
+inherits the `white`. The other five carry only `Title`/`Artist`/`Album`/
+`Date`/`Cover`-family widgets, none of which is implemented. An earlier
+reading of this entry's ground missed `[D_screenlet]`'s `DefaultFont=8`
+entirely and described the whole item as forward-looking; the `Text5` case
+makes it a fix to a shipped layout.
+
+Decision:
+
+`Render` reads both keys from `$layout->{metadata}` into `$self->{globals}`,
+and `_ApplyLabelOptions` falls back to them per option. Consequences of that
+shape:
+
+1. **The legacy precedence is preserved**: a widget's own `font=`/`color=`
+   wins, matching the `||` in both legacy call sites.
+2. **Each global is inherited independently.** Overriding the font leaves the
+   inherited colour applied and vice versa, because the fallback is per option
+   rather than for the pair. Measured on real Wayland: a label carrying
+   `font=8` under `DefaultFont=20, DefaultFontColor=white` renders at 80% *and*
+   in white.
+3. **A widget's own refused value is taken rather than falling through to the
+   global.** `font=oops` renders at the theme font, not at the inherited
+   ratio, which is what `||` does with a truthy but invalid value.
+4. `DefaultFont` reuses D031's `_FontRule`, **so the theme-relative ratio
+   applies to it too**: `DefaultFont = 20` becomes `200%` of the desktop font
+   for every label in that layout at once, and `DefaultFont=8` becomes `80%`.
+   The user was asked specifically about the whole-layout scope of that and
+   chose consistency with D031.
+5. `DefaultFontColor` reuses `_ColorRule`, so an inherited grey would become
+   `dim-label`. Every bundled use is `white`, which is emitted literally.
+
+`PATH`, `SkinPath`, and `SkinFile` are read into the same legacy hash and are
+**not** ported: they belong to the skin machinery, which has no GTK4 work yet.
+
+An inherited value the renderer cannot translate is reported through a new
+`UnhandledGlobals` accessor rather than the per-widget `Unhandled` list. No
+widget's options named it, so attributing it to every inheriting widget would
+misreport which options a layout actually wrote.
+
+Alternatives:
+
+1. Emit an inherited `DefaultFont` as absolute points while keeping a widget
+   `font=` theme-relative. Rejected by the user: it would create two rules for
+   one concept, and the D031 reasoning — that the desktop font should reach the
+   widget — applies at least as strongly to a global that styles a whole
+   layout.
+2. Implement `DefaultFontColor` only, deferring `DefaultFont` until
+   `Title`/`Artist`/`Album` land and it can be measured on a real fullscreen
+   layout. Offered to the user and declined; the fixture measures it fully
+   today, and splitting the two would leave half a mechanism.
+3. Report an untranslatable global against every inheriting widget. Rejected:
+   it would put an option name in `Unhandled` for a widget whose layout never
+   wrote it, which is the one thing that list is supposed to mean.
+4. Merge the globals into each widget's parsed option values, mirroring
+   `NewWidget:1162` literally. Rejected: it would mutate the parsed catalog,
+   which D002 keeps as a round-trippable compatibility surface, and the
+   renderer's `Unhandled` bookkeeping reads `{options}{order}` to decide what
+   the layout named.
+
+Consequences:
+
+`Label` and `Text` now honour both globals. No layout-visible name changes, so
+the D002 surface is untouched, and this stays inside D013 on the same ground as
+D031: it restores inheritance GTK4's removal of `modify_font`/`override_color`
+had broken. The theme-relative exception D031 records now extends to a
+whole-layout scope, which is the substantive parity note on this entry.
+
+`{metadata}` is now load-bearing for the renderer, where previously only
+`{nodes}` and `{roots}` were. `Type` remains metadata the renderer ignores,
+which is what lets a `Type=G` fixture carry both keys.
+
+Evidence or removal condition:
+
+`t/gtk4/30_Box.t` measures the rendered height and reads the style-context
+colour for an inheriting label, a label overriding the font, a label overriding
+the colour, and a label whose own values are both refused, against an unstyled
+baseline taken from a separate layout carrying no globals.
+`t/04_Gtk4LayoutRenderer.t` covers the metadata read, the grey inheritance path
+that works without a provider, the precedence, the `UnhandledGlobals`
+reporting, and that `Destroy` drops both.
+
+Run against the previous renderer, `t/gtk4/30_Box.t` fails **6 of 143** on real
+Wayland and `t/04_Gtk4LayoutRenderer.t` fails **7 of 250** offline. The
+pristine failure values were confirmed to be the right reason: `21 > 21` for
+the inherited font, because the previous renderer draws every label at the
+theme size, and `got rgb(46,52,54) / expected rgb(255,255,255)` for the
+inherited colour, `46,52,54` being the runner's Adwaita colour recorded in
+D006. The offline comparison needs only the `UnhandledGlobals` accessor stubbed
+into the pristine copy; `_Globals` must be confirmed absent before the
+comparison is trusted.
+
+Controls passing on both trees, which is what makes the comparison
+discriminate rather than merely fail everything: every assertion covering the
+pre-existing per-widget `font=`/`color=` path, `a label in a layout with no
+globals carries no styling class`, both "falls back to the theme, not to the
+global" assertions, and the four `undef` bookkeeping assertions.
+
+One assertion was vacuous as first written, in the same class as D030's two.
+`a widget's own color= overrides the inherited DefaultFontColor` asserted only
+that the overriding label lacks `dim-label`, which passes against a renderer
+that never applies `dim-label` to anything. It is now paired with an assertion
+that the inheriting and overriding labels differ from each other.
 
 ## Decision template
 

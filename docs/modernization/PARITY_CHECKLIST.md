@@ -44,6 +44,7 @@ surface. Numeric suffixes retain the base element's behaviour.
 | `size=`/`relief=` on any button | GTK4 in progress, see D027 (accepted) |
 | `xalign=`/`yalign=`/`ellipsize=` on `Label`/`Text` | GTK4 in progress, see D028 (accepted) |
 | `font=`/`color=` on `Label`/`Text` | GTK4 in progress, see D031 (accepted) |
+| `DefaultFont`/`DefaultFontColor` layout-wide inheritance | GTK4 in progress, see D032 (accepted) |
 | `tip=` tooltip option on the above | GTK4 in progress, literal tips only |
 | `AABox`, `AASearch`, `AddLabelEntry`, `Album`, `AlbumBox`, `AlbumSearch`, `Artist`, `ArtistBox`, `ArtistPic`, `ArtistSearch`, `BContext`, `Button`, `Choose`, `ChooseRandAlbum`, `Comment`, `Connections`, `Context`, `Cover`, `Date`, `EditList`, `EditListButtons`, `EmptyList`, `Equalizer`, `EqualizerPresets`, `EqualizerPresetsSimple`, `EventBox`, `FBox`, `FLock`, `FPane`, `Filter`, `FilterBox`, `FilterLock`, `FilterPane`, `Fullscreen`, `HSeparator`, `HistItem`, `LSortItem`, `LabelTime`, `LabelToggleButtons`, `LabelVol`, `LabelsIcons`, `LayoutItem`, `Length`, `Lock`, `LockAlbum`, `LockArtist`, `LockSong`, `MainMenuItem`, `MenuItem`, `OpenBrowser`, `OpenContext`, `OpenQueue`, `PFilterItem`, `PSortItem`, `PictureBrowser`, `PlayFilter`, `PlayItem`, `PlayList`, `PlayOrderCombo`, `PlayingTime`, `Pos`, `Pref`, `Progress`, `ProgressV`, `Queue`, `QueueActions`, `QueueFilter`, `QueueItem`, `QueueList`, `Refresh`, `Repeat`, `ResetFilter`, `Scale`, `SeparatorMenuItem`, `ShuffleList`, `SimpleSearch`, `SongInfo`, `SongList`, `SongSearch`, `SongTree`, `Sort`, `Stars`, `TabbedLists`, `Time`, `TimeBar`, `TimeSlider`, `Title`, `Title_by`, `TogButton`, `ToggleButton`, `Total`, `VProgress`, `VSeparator`, `Visuals`, `Vol`, `VolBar`, `VolSlider`, `Volume`, `VolumeBar`, `VolumeIcon`, `VolumeSlider`, `Year` | Not started |
 
@@ -198,9 +199,10 @@ non-numeric `xalign`/`yalign`, which falls back to the legacy default as GTK3's
 own coercion does. Both stay reported through `Unhandled`.
 
 Still unhandled for labels: `markup` (**76** uses), which needs `::UsedFields`
-and per-song substitution; `font` and `color`, which GTK4 moved from widget
-overrides to CSS; and `minsize`/`expand_max`, which drive the legacy
-scrolling-label machinery. Each belongs with a real `Layout::Label` port.
+and per-song substitution, and `minsize`/`expand_max`, which drive the legacy
+scrolling-label machinery. Both belong with a real `Layout::Label` port.
+`font` and `color` were listed here too until D031 implemented them through a
+CSS provider; that paragraph is below.
 Counting `markup` needs the same care as the widget counts: the bundled layouts
 also carry 24 `lmarkup=`, 11 `mmarkup=`, 2 `markup_empty=`, and 2
 `init_markup=`, and a bare `grep -o 'markup='` reports 113 by matching inside
@@ -266,10 +268,34 @@ worth reading before citing it as parity:
   than as a rendered colour.
 
 `DefaultFont`/`DefaultFontColor`, the layout-wide globals that
-`desktop.layout` and `fullscreen.layout` set, are **not** ported. So a `Text`
-in `desktop.layout` gets its explicit `color=grey` but not the inherited
-`white`. That is D031 alternative 5, deferred as layout-level option
-inheritance rather than a widget option.
+`desktop.layout` and `fullscreen.layout` set, are now inherited, as **D032**
+(status **Accepted**). Legacy `InitLayout` reads them into `{global_options}`
+(`gmusicbrowser_layout.pm:971`) and `NewWidget` merges that into every widget
+(`:1162`); the renderer previously never read the parser's `{metadata}`, where
+both land, so a label inheriting either was drawn at the theme font and colour.
+
+Three things about that row are worth reading before citing it:
+
+- **The `:1162` merge order does not give the global precedence.** Both options
+  fall back with `||` — `:1163` for the font and `:3120` for the colour — so a
+  widget's own `font=`/`color=` wins. Each global is inherited independently,
+  so overriding one leaves the other applied, and a widget's own *refused*
+  value is taken rather than falling through to the global.
+- **`DefaultFont` reuses D031's ratio**, so `fullscreen.layout`'s
+  `DefaultFont = 20` becomes `200%` of the desktop font for every label in that
+  layout at once. That extends D031's accepted parity exception from one widget
+  to a whole layout, which the user was asked about specifically.
+- **It is reachable from a bundled layout today.** `desktop.layout`'s
+  `[D_clementine]` sets `DefaultFontColor= white` and contains `Text5`, a
+  `Text` widget the renderer builds with no `color=` of its own. The other five
+  uses — two more `DefaultFontColor= white` in `desktop.layout`, its
+  `[D_screenlet]` `DefaultFont=8`, and both `fullscreen.layout`
+  `DefaultFont = 20` — sit in layouts whose widgets are all unimplemented.
+
+An inherited value the renderer cannot translate is reported through a separate
+`UnhandledGlobals` accessor, not the per-widget `Unhandled` list, because no
+widget's options named it. `PATH`, `SkinPath`, and `SkinFile` are read into the
+same legacy hash and are **not** ported: they belong to the skin machinery.
 
 `AB`'s fractional gap is **closed** as of 2026-09-07. A fractional alignment
 or scale now goes through a `Gtk4::ConstraintLayout` reproducing the legacy

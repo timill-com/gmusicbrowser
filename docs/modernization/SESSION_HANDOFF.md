@@ -1,6 +1,106 @@
 # Session handoff
 
-Status: the tree is clean. This session recorded the user's standing
+Status: the tree is clean. This session did one increment: the layout-wide
+`DefaultFont`/`DefaultFontColor` globals are now inherited by every label,
+recorded as **D032**. That closes D031's deferred alternative 5, which the
+previous handoff named as the most likely next step.
+
+## This session's increment: layout-level option inheritance
+
+`DefaultFont` and `DefaultFontColor` are layout properties, not widget
+options. Legacy `InitLayout` reads them into `{global_options}`
+(`gmusicbrowser_layout.pm:971`) and `NewWidget` merges that hash into every
+widget (`:1162`). The parser already kept both in `$layout->{metadata}` — the
+renderer simply **never read `{metadata}` at all**, so the whole mechanism was
+unimplemented. `Render` now collects them and `_ApplyLabelOptions` falls back
+to them per option.
+
+**The precedence trap, which is the most transferable part.** `%$global_opt` is
+merged *last* at `:1162`, so the merge order reads as though the global wins.
+Neither option lets it: `:1163` is `$options{font} ||= $global_opt->{DefaultFont}`
+and `Layout::Label` at `:3120` is `$opt->{color} || $opt->{DefaultFontColor}`.
+Both are `||`, so **the widget's own value wins**. Do not infer a precedence
+from a merge order without reading what the consumer does with the merged hash.
+
+Three consequences that fell out of implementing it per option rather than as a
+pair, all measured on real Wayland:
+
+- **Each global is inherited independently.** A label carrying `font=8` under
+  `DefaultFont=20, DefaultFontColor=white` renders at 80% *and* in white.
+  Overriding one global must not discard the other.
+- **A widget's own refused value is taken rather than falling through to the
+  global.** `font=oops` renders at the theme font, not at the inherited ratio,
+  because `||` accepts a truthy-but-invalid value.
+- **`DefaultFont` reuses D031's `_FontRule`,** so `fullscreen.layout`'s
+  `DefaultFont = 20` becomes `200%` of the desktop font for every label in that
+  layout at once. The user was asked about that whole-layout scope specifically
+  and chose consistency with D031 over an absolute size.
+
+The measured table, from a probe inside the runner:
+
+| label | own options | height | colour | classes |
+|---|---|---:|---|---|
+| baseline, no globals | — | 21 | theme | none |
+| `Text` | — | 41 | `rgb(255,255,255)` | `gmb-font-200`, `gmb-color-white` |
+| `Text2` | `font=8` | 17 | `rgb(255,255,255)` | `gmb-color-white`, `gmb-font-80` |
+| `Text3` | `color=grey` | 41 | theme | `dim-label`, `gmb-font-200` |
+| `Text4` | `font=oops,color=notacolour!` | 21 | theme | none |
+
+An untranslatable global is reported through a new **`UnhandledGlobals`**
+accessor rather than the per-widget `Unhandled` list. No widget's options named
+it, so attributing it to every inheriting widget would misreport what the
+layout actually wrote. `PATH`, `SkinPath`, and `SkinFile` are read into the
+same legacy hash and are **not** ported — they belong to the skin machinery.
+
+### The reachability claim in the previous handoff was wrong in both directions
+
+It said this was "reachable from the bundled layouts" only "in a qualified
+sense", closer to forward-looking work. Re-checked by dumping the catalog:
+
+- **There are six uses, not five.** `desktop.layout:57` sets `DefaultFont=8`
+  in `[D_screenlet]`, which the previous handoff missed entirely while listing
+  the other five.
+- **One is reachable on an already-implemented widget today.**
+  `desktop.layout`'s `[D_clementine]` sets `DefaultFontColor= white` and
+  contains `Text5`, a `Text` widget the renderer builds, with no `color=` of
+  its own. The previous reading noted that `[D_clementine]` "contains the
+  `color=grey` widgets that override it" and stopped there — `Text5` is the
+  one label in that block with no `color=`, so it is precisely the inheriting
+  case.
+
+So this was a fix to a shipped layout, not forward-looking work. The bad
+reading came from checking which widgets carry `color=` rather than which
+carry none.
+
+### Verification for this increment
+
+- `t/gtk4/30_Box.t` fails **6 of 143** against a pristine `git archive HEAD`
+  on real Wayland; `t/04_Gtk4LayoutRenderer.t` fails **7 of 250** offline.
+- Pristine failure values confirmed as the right reason: `21 > 21` for the
+  inherited font, because pristine draws every label at the theme size, and
+  `got rgb(46,52,54) / expected rgb(255,255,255)` for the inherited colour.
+- The offline comparison needs only the `UnhandledGlobals` accessor stubbed
+  into the pristine copy — fewer stubs than D031 needed, because the
+  inheritance sits on helpers that already exist. `_Globals` was confirmed
+  absent from the pristine renderer before the comparison was trusted.
+- **Most override assertions are controls, not proofs.** The per-widget
+  `font=`/`color=` path already existed, so every assertion about an
+  overriding widget passes on both trees. Each new assertion was read
+  individually from `prove -v`; the file-level count hides which discriminates.
+- One assertion was vacuous as first written and was strengthened: `a widget's
+  own color= overrides the inherited DefaultFontColor` asserted only that the
+  overriding label lacks `dim-label`, which passes against a renderer that
+  never applies `dim-label` at all. It is now paired with an assertion that
+  the inheriting and overriding labels differ from each other.
+- **The unstyled baseline must come from a separate layout carrying no
+  globals.** Every label in a layout with a global inherits it, so a
+  within-layout baseline measures the global against itself. The fixture holds
+  four layouts for this reason.
+- No shared code changed. `make test-gtk3` was run anyway and passes.
+
+## Previous session
+
+The session before this one recorded the user's standing
 native-mechanism policy as **D029**, closed `AB`'s fractional alignment gap
 through a `Gtk4::ConstraintLayout` (**D030**, superseding the fractional half
 of the Accepted D025), and applied the legacy label `font=`/`color=` options
@@ -14,8 +114,8 @@ choice is that **the OS theme font and colours already reach the renderer's
 labels with no code at all**, so any styling the renderer adds is an override
 of the theme, not a gain.
 
-The decision backlog remains cleared: D023, D024, D025, D026, D027, and D028
-are all **Accepted**.
+The decision backlog remained cleared: D023, D024, D025, D026, D027, and D028
+were all **Accepted**.
 
 Five were accepted as implemented, with no code change. One was accepted
 *against* the entry's own recommendation and became this session's increment:
@@ -34,6 +134,10 @@ the decision gate on each row without advancing it. No row was advanced to
 `Parity review` this session.
 
 Last session: 2026-09-07. Branch `gtk4-alpha`.
+
+**Decision state.** D023–D032 are all **Accepted**. Four entries remain
+**Proposed** — D009, D011, D012, D019 — and those are pre-existing and
+unrelated to the layout rows. Do not mistake them for a cleared backlog.
 
 Read `MODERNIZATION.md` and `AGENTS.md` first. This file only records where the
 previous session stopped and what the next one should verify before continuing.
@@ -114,14 +218,10 @@ Four things worth carrying forward:
   values pristine also refuses.
 - No shared code changed. `make test-gtk3` was run anyway and passes.
 
-### What this increment does NOT cover
+### What this increment did NOT cover
 
-`DefaultFont`/`DefaultFontColor` — the layout-wide globals read at
-`gmusicbrowser_layout.pm:971`, which `desktop.layout` sets to `white` at three
-scopes and `fullscreen.layout` sets to `20`. So a `Text` in `desktop.layout`
-gets its explicit `color=grey` but not the inherited `white`. That is D031
-alternative 5, deferred as **layout-level option inheritance**, which is a
-different unit from a widget option and is the natural follow-up here.
+`DefaultFont`/`DefaultFontColor` inheritance was deferred as D031 alternative
+5. **Done this session as D032**; see the top of this file.
 
 Also note the four bundled `font=` uses are all on
 `Title`/`Artist`/`Album`/`Date`, none of which the renderer builds yet, so
@@ -408,6 +508,8 @@ Everything is committed. For the number of commits past `master`, run
 `git rev-list --count master..HEAD` rather than trusting a figure here.
 Newest first:
 
+	1bf528a gtk4: inherit the layout-wide DefaultFont and DefaultFontColor
+	fddcf65 docs: record D031 and the label font/color CSS results
 	c97247b gtk4: apply the legacy label font and color options through CSS
 	6e33759 docs: record D030 and the AB constraint layout results
 	fe65c9c gtk4: render a fractional AB alignment through a constraint layout
@@ -434,10 +536,15 @@ Newest first:
 	d4c87d0 agents file
 	774aa2e initial plan
 
-This session's increment touched no shared code either. It changed
+This session's increment touched no shared code. It changed
+`gmusicbrowser_gtk4_layout.pm`, `t/04_Gtk4LayoutRenderer.t`, and
+`t/gtk4/30_Box.t`, and added `t/layouts/inherit.layout`. Documentation is
+committed separately, as before.
+
+The `font=`/`color=` CSS increment before it changed
 `gmusicbrowser_gtk4_layout.pm`, `t/04_Gtk4LayoutRenderer.t`,
-`t/gtk4/30_Box.t`, and `t/layouts/labels.layout`. Documentation is committed
-separately, as before.
+`t/gtk4/30_Box.t`, and `t/layouts/labels.layout`, and also touched no shared
+code.
 
 Of the previous session's two, neither touched shared code. The
 `size=`/`relief=` one changed
@@ -656,7 +763,11 @@ the renderer: GTK3 leaves such a label un-ellipsized. `%LabelHandled` covers `te
 `ellipsize`, `minwidth`, `minheight`, `font`, and `color`; `markup`,
 `minsize`, and `expand_max` stay reported. `font=`/`color=` land through a
 `GtkCssProvider` under D031, with `font=` expressed as a ratio of the desktop
-font rather than as absolute points.
+font rather than as absolute points. Under D032 a label with neither option
+inherits the layout's `DefaultFont`/`DefaultFontColor` through the same
+provider, per option and with the widget's own value winning; an
+untranslatable global is reported through `UnhandledGlobals` rather than
+through the per-widget list.
 
 Both increments follow the same pattern, and it is worth looking for more of
 it: a legacy `@default_options` value whose GTK4 counterpart differs is a
@@ -1119,21 +1230,23 @@ Commands that were actually run and passed this session:
 	make test-gtk3
 	git diff --check
 
-`make test-modernization`: **395** executed assertions passed, no skips.
-Running totals: 269 two sessions ago, 298 after `Next`/`Prev`, 315 after
+`make test-modernization`: **415** executed assertions passed, no skips.
+Running totals: 269 three sessions ago, 298 after `Next`/`Prev`, 315 after
 `Filler`, 317 after the labels fixture, 325 after `size=`/`relief=`, 342 after
 label alignment, 344 after the `ellipsize=1` normalisation, 364 after the `AB`
-constraint layout, 395 after the label `font=`/`color=` CSS. The skip count was
+constraint layout, 395 after the label `font=`/`color=` CSS, 415 after the
+`DefaultFont`/`DefaultFontColor` inheritance. The skip count was
 read from `prove -v`, not assumed.
 
-`make test-gtk4` on the real Wayland connection: **304** TAP results,
-comprising **298 executed assertions passed** and the same six pre-existing M1
+`make test-gtk4` on the real Wayland connection: **323** TAP results,
+comprising **317 executed assertions passed** and the same six pre-existing M1
 feasibility probes skipped, 0 failures. Per file: 18 binding (which is where
-all six skips live), 4 proof-of-life, 84 pane, 124 box, 74 icon. Running totals
+all six skips live), 4 proof-of-life, 84 pane, 143 box, 74 icon. Running totals
 for the same command: 173 before `Next`/`Prev`, 184 after it, 202 after
 `Filler`, 216 after the `AB` coverage, 246 after `size=`/`relief=`, 258 after
 label alignment, 261 after the `ellipsize=1` normalisation, 287 after the `AB`
-constraint layout, 304 now. Do not restate this as 298 passing assertions. The six skips were counted by copying the runner to
+constraint layout, 304 after the label `font=`/`color=` CSS, 323 now. Do not
+restate this as 317 passing assertions. The six skips were counted by copying the runner to
 `tools/.verbose-smoke-tmp`, switching `prove` to `-v`, and grepping
 `^ok [0-9]+ # skip` — six matches, all `BLOCKED:` M1 probes in
 `t/gtk4/00_Binding.t`. Not assumed. Note that a copy of the runner placed
@@ -1300,15 +1413,23 @@ means the reported ~1190px window is not the layout's designed size.
 
 ## Suggested next steps
 
-0. **Layout-level option inheritance**, the natural follow-up to D031 and its
-   deferred alternative 5. `DefaultFont`, `DefaultFontColor`, `PATH`,
-   `SkinPath`, and `SkinFile` are read into `{global_options}` at
-   `gmusicbrowser_layout.pm:971` and inherited by every widget in the layout.
-   `desktop.layout` sets `DefaultFontColor= white` at three scopes and
-   `fullscreen.layout` sets `DefaultFont = 20`, so this is reachable from the
-   bundled layouts, and the CSS mechanism it needs now exists. It is a
-   different unit from a widget option: scope it as option inheritance, not as
-   a label option.
+0. ~~Layout-level option inheritance.~~ **Done** as D032. `DefaultFont` and
+   `DefaultFontColor` are inherited; `PATH`, `SkinPath`, and `SkinFile` are
+   read into the same legacy hash and are deliberately **not** ported, because
+   they belong to the skin machinery, which has no GTK4 work yet. That is the
+   remaining half of `{global_options}` and needs a skin design first.
+
+0b. **More of the `Layout::Label` family** is now the strongest candidate, and
+   D032 raises its value. The family is `Text`, `Pos`, `Title`, `Title_by`,
+   `Artist`, `Album`, `Year`, `Comment`, `Length`, `PlayingTime`, `Volume`,
+   `Visuals`, `LabelToggleButtons`, with `Label` an alias for `Text`; only
+   `Text`/`Label` is implemented. Implementing `Title`/`Artist`/`Album` would:
+   - make D031's `font=` reachable from a shipped layout for the first time —
+     all four bundled `font=` uses are on `Title`/`Artist`/`Album`/`Date`;
+   - make five of D032's six bundled global uses reachable, since all five
+     unreachable ones sit in layouts whose labels are exactly these elements;
+   - need the song-field state path, which is the real cost and is shared with
+     `markup=`. Scope that first.
 
 1. ~~Decide the six Proposed entries.~~ **Done.** D023, D024, D025, D026,
    D027, and D028 are all Accepted. The recorded resolutions, so a later
@@ -1382,6 +1503,34 @@ means the reported ~1190px window is not the layout's designed size.
 
 ## Working notes
 
+- **Do not infer a precedence from a merge order.** `NewWidget:1162` merges
+  `%$global_opt` *last*, which reads as though a layout-wide global outranks a
+  widget option. Neither of the two globals lets it: both fall back with `||`
+  (`:1163` and `:3120`), so the widget wins. Read what the consumer does with
+  the merged hash, not just how the hash was built.
+- **`{metadata}` is now load-bearing for the renderer.** It was previously
+  unread — only `{nodes}` and `{roots}` were — so a layout property was
+  invisible to it. `Type` is still metadata the renderer ignores, which is what
+  lets a `Type=G` fixture carry keys only `Type=D`/`Type=F` layouts really use.
+- **An inherited value needs a reporting channel of its own.** The per-widget
+  `Unhandled` list means "options this layout wrote on this widget", and it is
+  built from `{options}{order}`. Putting an inherited name in it would misreport
+  the layout. `UnhandledGlobals` is the separate accessor.
+- **A baseline for an inherited option cannot come from the same layout.**
+  Every label under a global inherits it, so a within-layout baseline measures
+  the global against itself. Take the unstyled baseline from a separate layout
+  carrying no globals.
+- **Checking which widgets carry an option is not checking which inherit it.**
+  The previous handoff established that `[D_clementine]`'s labels carry
+  `color=grey` and concluded the inheritance was barely reachable. `Text5` in
+  the same block carries none, which makes it exactly the inheriting case and
+  the increment a fix to a shipped layout. Grep for the absence, not the
+  presence.
+- **When an increment adds a fallback, most of its override assertions are
+  controls.** The per-widget path already worked, so every "the widget wins"
+  assertion passes on both trees. Only the inheriting cases discriminate.
+  Reading the file's failure count would have made the proof look twice as
+  strong as it is.
 - **The OS theme font and colours already reach the renderer with no code.**
   An unstyled `Gtk4::Label` measures 19x17 under this host's `Roboto 10`, and
   GTK3 reports the same. Any `font=`/`color=` the renderer applies is an
