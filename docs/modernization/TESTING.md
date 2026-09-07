@@ -10,9 +10,10 @@ make test-modernization
 
 This runs the neutral layout parser, frontend contract and lifecycle, legacy
 adapter and lifecycle integration, and GTK4 renderer contract tests. On
-2026-09-07 it reported 317 executed assertions passed and no skips. Running
-totals across this session's three increments: 269 before it, 298 after
-`Next`/`Prev`, 315 after `Filler`, 317 after the shared labels fixture. The
+2026-09-07 it reported 325 executed assertions passed and no skips. Running
+totals: 269 at the start of the previous session, 298 after `Next`/`Prev`, 315
+after `Filler`, 317 after the shared labels fixture, 325 after the
+`size=`/`relief=` increment. The
 renderer test uses small in-process GTK doubles; it proves the
 parser/renderer/command wiring without claiming that a real GTK4 binding or
 display passed.
@@ -70,13 +71,14 @@ The action test uses [cycle-handle-focus](https://docs.gtk.org/gtk4/signal.Paned
 before [move-handle](https://docs.gtk.org/gtk4/signal.Paned.move-handle.html).
 
 `t/gtk4/30_Box.t` adds real `HB`/`VB` packing geometry to the runner. On
-2026-09-07, after the `Filler` and size-request increment, the full
-`make test-gtk4` run reported 216 TAP results: 210 executed assertions passed
+2026-09-07, after the `size=`/`relief=` increment, the full
+`make test-gtk4` run reported 246 TAP results: 240 executed assertions passed
 and the same six feasibility probes were skipped, 0 failures. The skips were
 counted from `prove -v` and are the same six M1 probes as before. Running
 totals for the same command: 173 results before `Next`/`Prev`, 184 after it,
-202 after `Filler`, 216 after the `AB` alignment coverage. The box file
-contributes 66 executed assertions and the icon file 44.
+202 after `Filler`, 216 after the `AB` alignment coverage, 246 after
+`size=`/`relief=`. Per file: 18 binding, which is where all six skips live,
+4 proof-of-life, 84 pane, 66 box, 74 icon.
 They read allocated child offsets with
 [translate_coordinates](https://docs.gtk.org/gtk4/method.Widget.translate_coordinates.html);
 `compute_bounds` and `compute_point` are unusable through this binding, which
@@ -121,12 +123,13 @@ effect on an already-mapped Wayland window. `t/gtk4/20_Paned.t` used
 on that account, before and independently of the box change; it now uses
 `set_size_request`, and all 84 pane assertions pass.
 
-`t/gtk4/40_Icons.t` covers GTK4 icon resolution with 33 executed assertions on
+`t/gtk4/40_Icons.t` covers GTK4 icon resolution with 74 executed assertions on
 real Wayland. It uses `t/layouts/icons.layout`, which exercises a legacy `gtk-*`
 name, the `stock=` option, a bundled `gmb-*` file, a bundled alias with no file
 of its own, an unresolvable name, and a widget with no icon option. It then
 pins a standalone icon theme to Adwaita to check the `-symbolic` fallback added
-for D024.
+for D024, and finally asserts the D027 `size=`/`relief=` translation against
+the live theme.
 
 Measured against GTK 4.14.5, which is why the resolution chain exists rather
 than a direct pass-through:
@@ -293,6 +296,29 @@ The symbolic fallback is a behaviour change, not a construction detail. Run
 against the previous `_IconName` in a scratch copy of the tree,
 `t/gtk4/40_Icons.t` fails 2 assertions, returning `application-exit` and
 `view-refresh` where Adwaita can render only the symbolic variants.
+
+The `size=`/`relief=` assertions for D027 are behaviour too. Proved by
+extracting `git archive HEAD` to a scratch directory — the whole tree, not a
+hand-picked subset — and overlaying only the two changed test files and the two
+changed fixtures, so the old renderer is judged against the new assertions:
+
+- `t/gtk4/40_Icons.t` fails **16 of 74** on real Wayland.
+- `t/04_Gtk4LayoutRenderer.t` fails **5 of 160** offline.
+
+The comparison discriminates rather than merely failing everything: the control
+cases pass on both trees. On pristine, `relief=normal keeps the frame`, the six
+`isa_ok` image checks, `an unknown size= leaves the pixel size unset`, `an
+unknown size= is still reported as unhandled`, and `a real widget reports the
+options it ignored` all pass, because the old renderer's GTK4 defaults happen
+to be framed and unsized and it reported `size`/`relief` as unhandled.
+
+**A `measure()` check on an icon only discriminates above 16px.** GTK4's own
+default icon size is 16, so the `menu`, `button`, and `small-toolbar` rows
+measure correctly even against a renderer that ignores `size=` entirely — three
+of the nine measure assertions pass on pristine. `get_pixel_size` is what
+actually pins those three. This is the same class of trap as the recorded
+`set_size_request` one: a physical measurement that agrees with the expectation
+by coincidence rather than because the option took effect. Both are in D006.
 
 A reduced GTK3 probe on 2026-09-07 copied the legacy pane calculations into
 `/tmp/gmb-legacy-paned-wayland.pl`, used two labels, temporary XDG config/data/

@@ -149,6 +149,21 @@ Evidence recorded so far, against the system
   recorded for `t/gtk4/20_Paned.t`. Assert a widget's minimum through
   `measure($orientation,-1)`, which returns
   `(minimum, natural, min_baseline, nat_baseline)` and marshals correctly.
+- An out-of-range enum nickname is a **fatal** error through this binding, not
+  a warning or a silent no-op: `Image->set_icon_size('menu')` dies with
+  `FATAL: invalid enum GtkIconSize value menu, expecting: inherit / normal /
+  large`. So a legacy GTK3 enum nickname cannot be passed through and probed
+  for afterwards; it has to be mapped before the call. `GtkIconSize` measures
+  16px for both `inherit` and `normal` and 32px for `large`.
+- `Button->set_icon_name` creates a `Gtk4::Image` child reachable through
+  `get_child`, and `set_pixel_size` on it works and is reflected in
+  `measure()`. `set_label` replaces that child. `Button->get_icon_name`
+  returns undef once the child is replaced with an explicit image, so styling
+  the button's own image is the route that keeps both working.
+- `Button->set_relief`/`get_relief` are absent, as expected for GTK4.
+  `set_has_frame`/`get_has_frame` are present; `get_has_frame` returns `1` and
+  the empty string rather than `1`/`0`, so compare it loosely or against `''`.
+  `add_css_class('flat')` also works and `get_css_classes` reads it back.
 
 ## D007 — Canonical application ID
 
@@ -713,6 +728,113 @@ Construction is covered in `t/04_Gtk4LayoutRenderer.t`. Revisit when
 `hover_layout` is ported: that is the point at which alternative 2 must be
 accepted or rejected, and at which `WB` either gains real behaviour or is
 formally recorded as a compatibility shim with none.
+
+## D027 — Legacy icon `size=` becomes a pixel size, and `relief=` becomes has-frame
+
+Status: **Proposed**
+
+Gate: before any button row is advanced past `GTK4 in progress`
+
+Context:
+
+`Layout::Button` sets `relief => 'none'` and `size => SIZE_BUTTONS` in
+`@default_options` (`gmusicbrowser_layout.pm:3001`), so both apply to *every*
+button widget, not only to a layout that names them. `SIZE_BUTTONS` is
+`large-toolbar` and `SIZE_FLAGS` is `menu` (`:18-19`). The GTK4 renderer
+implemented neither, so every button it built was wrong in the same way
+`minwidth=` was before the previous session: silently, and by default.
+
+GTK4 removed both APIs. `gtk_button_set_relief` is gone, and `GtkIconSize` was
+cut from the GTK3 set down to three values. Measured through the system
+binding on GTK 4.14.5, every legacy name is a hard failure:
+
+	set_icon_size('menu') -> FATAL: invalid enum GtkIconSize value menu,
+	  expecting: inherit / normal / large
+
+`inherit` and `normal` both measure 16px and `large` measures 32px, so the
+enum cannot express the legacy set: `large-toolbar` is 24 and `dialog` is 48.
+
+Decision:
+
+Translate `size=` to `set_pixel_size` on the button's image, using the pixel
+size GTK3 resolves each legacy name to, and translate `relief=` to
+`set_has_frame`.
+
+The pixel sizes are read from `Gtk3::IconSize::lookup` on GTK 3.24.41 rather
+than assumed:
+
+| legacy `size=` | GTK3 pixels | uses in `layouts/` |
+|---|---:|---:|
+| `menu` (`SIZE_FLAGS`) | 16 | 54 |
+| `button` | 16 | 46 |
+| `large-toolbar` (`SIZE_BUTTONS`) | 24 | 16 |
+| `dialog` | 48 | 9 |
+| `small-toolbar` | 16 | 4 |
+| `dnd` | 32 | 0 |
+
+Those five plus `dnd` are the whole GTK3 icon-size set, and the first five are
+exactly the values that appear in the bundled layouts. `set_pixel_size`
+reproduces each one exactly, so **this translation is lossless**, not a
+bucketing approximation — unlike D025's fractional alignment case.
+
+`Gtk4::Button->set_icon_name` builds the `GtkImage` itself, so the pixel size
+is set on that child. This keeps `Button->get_icon_name` working, which the
+renderer's own `_SetIcon`/`_SetPlayLabel` and the icon tests rely on;
+substituting an explicit `Gtk4::Image` child would leave `get_icon_name`
+undefined.
+
+A `size=` value outside the mapping is left to the theme and keeps being
+reported through `Unhandled`, so it is recorded rather than silently accepted.
+
+Alternatives:
+
+1. Map the legacy names onto the three-valued GTK4 enum (`menu`/`button` to
+   `normal`, the rest to `large`). Rejected: it is lossy where
+   `set_pixel_size` is not. `large-toolbar`, the default for every button,
+   would render at 32px instead of 24, and `dialog` at 32 instead of 48.
+2. Ignore `size=` and let the theme decide every icon size. Rejected: it
+   silently changes the size of every button in every bundled layout, and
+   `size=` is a layout-visible option under D002.
+3. Use `add_css_class('flat')` for `relief=none` instead of
+   `set_has_frame(0)`. Both work; `set_has_frame` was chosen because it is the
+   documented property replacing `set_relief` rather than a style-class
+   convention, and it is readable back through `get_has_frame` for testing.
+
+Consequences:
+
+Every button the renderer builds now gets the legacy defaults, so `Play`,
+`Quit`, `Prev`, `Stop`, and `Next` are frameless 24px icon buttons as GTK3
+draws them, rather than framed buttons at the theme's default size. `size=`
+and `relief=` leave `%ButtonHandled`'s ignored list. No layout-visible name
+changes and no artwork is added, removed, or restyled, so this stays inside
+D013 on the same ground as D023 and D024: it repairs a mechanism GTK4 removed.
+
+The bundled layouts already exercise this on widgets the renderer builds
+today, so it is not forward-looking work: `layouts/fullscreen.layout` gives
+`Play`, `Prev`, `Stop`, and `Next` `size=dialog`, which is **48px** against the
+24px default, and `layouts/contrib.layout` gives `Play`, `Prev`, `Stop`,
+`Next`, `Quit1`, and `Quit2` explicit sizes. Before this decision every one of
+those rendered at the theme's default size inside a framed button.
+
+This does not cover the `Total(size=small)` uses in `layouts/contrib.layout`.
+That is a font size on a different widget, not an icon size, and does not
+belong in this mapping.
+
+Evidence or removal condition:
+
+`t/gtk4/40_Icons.t` asserts the pixel size and the measured natural width for
+all six mapped names against a real theme on Wayland, plus the unset case for
+an unmapped name and both relief states. Run against the previous renderer it
+fails 16 of 74; `t/04_Gtk4LayoutRenderer.t` fails 5 of 160. Revisit if a
+supported desktop is found where a legacy pixel size is visibly wrong against
+its GTK3 rendering under the same layout.
+
+Note for anyone extending the assertions: a `measure()` check only
+discriminates above 16px, because GTK4's own default icon size is 16. The
+`menu`, `button`, and `small-toolbar` rows measure correctly even against a
+renderer that ignores `size=` entirely, so `get_pixel_size` is what actually
+pins those three. This is the same class of trap as the recorded
+`set_size_request` one in D006.
 
 ## Decision template
 

@@ -41,6 +41,7 @@ surface. Numeric suffixes retain the base element's behaviour.
 | `Label`, `Text`, `Play`, `Quit`, `Stop`, `Next`, `Prev`, `Filler` | GTK4 in progress |
 | `minwidth=`/`minheight=` on any widget or container | GTK4 in progress |
 | Icon options (`icon=`, `stock=`) on the above | GTK4 in progress, see D023 |
+| `size=`/`relief=` on any button | GTK4 in progress, see D027 |
 | `tip=` tooltip option on the above | GTK4 in progress, literal tips only |
 | `AABox`, `AASearch`, `AddLabelEntry`, `Album`, `AlbumBox`, `AlbumSearch`, `Artist`, `ArtistBox`, `ArtistPic`, `ArtistSearch`, `BContext`, `Button`, `Choose`, `ChooseRandAlbum`, `Comment`, `Connections`, `Context`, `Cover`, `Date`, `EditList`, `EditListButtons`, `EmptyList`, `Equalizer`, `EqualizerPresets`, `EqualizerPresetsSimple`, `EventBox`, `FBox`, `FLock`, `FPane`, `Filter`, `FilterBox`, `FilterLock`, `FilterPane`, `Fullscreen`, `HSeparator`, `HistItem`, `LSortItem`, `LabelTime`, `LabelToggleButtons`, `LabelVol`, `LabelsIcons`, `LayoutItem`, `Length`, `Lock`, `LockAlbum`, `LockArtist`, `LockSong`, `MainMenuItem`, `MenuItem`, `OpenBrowser`, `OpenContext`, `OpenQueue`, `PFilterItem`, `PSortItem`, `PictureBrowser`, `PlayFilter`, `PlayItem`, `PlayList`, `PlayOrderCombo`, `PlayingTime`, `Pos`, `Pref`, `Progress`, `ProgressV`, `Queue`, `QueueActions`, `QueueFilter`, `QueueItem`, `QueueList`, `Refresh`, `Repeat`, `ResetFilter`, `Scale`, `SeparatorMenuItem`, `ShuffleList`, `SimpleSearch`, `SongInfo`, `SongList`, `SongSearch`, `SongTree`, `Sort`, `Stars`, `TabbedLists`, `Time`, `TimeBar`, `TimeSlider`, `Title`, `Title_by`, `TogButton`, `ToggleButton`, `Total`, `VProgress`, `VSeparator`, `Visuals`, `Vol`, `VolBar`, `VolSlider`, `Volume`, `VolumeBar`, `VolumeIcon`, `VolumeSlider`, `Year` | Not started |
 
@@ -110,12 +111,12 @@ through the widget-free bridge; `t/05_FrontendLegacy.t` asserts that the bridge
 now refuses to construct when either definition is missing, so a widget can
 never be wired to an unregistered command.
 
-The renderer acts on `icon`, `stock`, `text`, and `tip` only. Every other
-option a layout supplies to one of these buttons is reported by the new
+The renderer acts on `icon`, `stock`, `text`, `tip`, `size`, and `relief` only.
+Every other option a layout supplies to one of these buttons is reported by the
 `Unhandled` accessor and left untouched in the parsed catalog, so an ignored
 option is recorded rather than silently accepted. What that currently covers:
 `nbsongs` and `group`, which in GTK3 only feed the `Prev`/`Next` `click3` song
-chooser; `size` and `relief`, which need the legacy `Layout::Button` defaults;
+chooser; a `size=` value outside the mapping in D027;
 and `button=0`, which asks for the `EventBox` form rather than a real button
 and is used by three `layouts/titlebar.layout` layouts. For scale: the bundled
 layouts instantiate `Next` 34 times, `Prev` 29, and `Stop` 20.
@@ -128,13 +129,47 @@ emitting `clicked`, which is the signal a real click raises, not by
 synthesising pointer input. The `group` values also differ from what a reader
 might assume: `Next` is `group => 'Next'` but `Prev` is `group => 'Recent'`.
 
-Icon sizes and states are still unhandled: `size=button`, `size=large-toolbar`,
-`size=menu`, `relief=none`, and the two-state `stock="on:... off:..."` form used
-by `LockAlbum`/`LockArtist`. Note that legacy `Layout::Button` defaults are
-`relief=>'none'` and `size=>SIZE_BUTTONS` (`large-toolbar`), so these are the
-default for every button widget rather than rare options. The 28 bundled `gmb-*` names remain app-supplied
+Icon sizes and relief are now implemented, as **D027** (status **Proposed**).
+Legacy `Layout::Button` defaults are `relief=>'none'` and `size=>SIZE_BUTTONS`
+(`large-toolbar`), which are the default for *every* button widget rather than
+rare options, so until this increment every button the renderer built was framed
+and theme-sized instead of flat and 24px. GTK4 removed `set_relief` and cut
+`GtkIconSize` to `inherit`/`normal`/`large`, so `size=` becomes
+`set_pixel_size` on the button's image and `relief=` becomes `set_has_frame`.
+The pixel sizes come from `Gtk3::IconSize::lookup` on GTK 3.24.41, so the
+translation is lossless: `menu` 16, `button` 16, `small-toolbar` 16,
+`large-toolbar` 24, `dnd` 32, `dialog` 48. Those are the whole GTK3 set, and
+the five that appear in `layouts/` are `menu` (54), `button` (46),
+`large-toolbar` (16), `dialog` (9), and `small-toolbar` (4). `Total(size=small)`
+in `layouts/contrib.layout` is a font size on a different widget, not an icon
+size, and is outside this mapping.
+
+Still unhandled for buttons: the two-state `stock="on:... off:..."` form. That
+form is used only by `LockAlbum`/`LockArtist` (six sites in
+`layouts/contrib.layout` and `layouts/shimmer.layout`), and those are
+`Layout::Button` with `button => 0` — `GtkEventBox` forms, not buttons — whose
+widget-table `stock` is already a hashref keyed by a `state` getter
+(`gmusicbrowser_layout.pm:144-155`). Each state's value carries two icons, the
+second of which GTK3 shows on `enter_notify_event`. So that form needs state,
+the `EventBox` shape, and pointer hover, not just a string parse.
+The 28 bundled `gmb-*` names remain app-supplied
 artwork and do not follow the host theme; mapping them to freedesktop names is
 deferred by D023 alternative 2 and has not been proposed for acceptance.
+
+`ToggleButton` is **not** a `Layout::Button` variant, contrary to what earlier
+handoffs recorded. It is `Layout::TogButton`
+(`gmusicbrowser_layout.pm:602`, class at `:3805`), a `Gtk3::ToggleButton`
+subclass whose entire purpose is showing and hiding *another* layout widget. It
+has no `activate` and dispatches no command. It reads `widget`, `togglegroup`,
+and `resize`, and drives `::get_layout_widget`, `GetShowHideState`, `ShowHide`,
+and `Hide`, plus a `::Watch($self,'HiddenWidgets',...)` subscription.
+
+All **39** `ToggleButton`/`TogButton` option groups in `layouts/` carry
+`widget=`. There is not one plain toggle among them. So porting `ToggleButton`
+means porting the layout show/hide subsystem first, which is a much larger unit
+than a `%Buttons` entry and is not a button increment at all. It reuses
+`%Buttons` and `_CreateButton` only for its icon, size, and relief — the parts
+D027 now covers.
 
 `Filler` is the legacy `Gtk3::HBox->new`, so GTK4 builds it as an empty
 `Gtk4::Box`. It carries no options in any bundled layout: all 102 instances are

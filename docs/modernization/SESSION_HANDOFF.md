@@ -1,16 +1,50 @@
 # Session handoff
 
-Status: `HEAD` is `b85b89d` "docs: decide AB and WB, and cover AB alignment on
-real Wayland". The tree is clean. Four increments landed this session:
-`Next`/`Prev` with the port's first shared-boundary change and a working GTK3
-regression smoke; `Filler` with the legacy `ApplyCommonOptions` size request;
-the shared test labels fixture; and D025/D026 for `AB`/`WB` with real-Wayland
-`AB` alignment coverage.
+Status: `HEAD` is `0074c06` "docs: record the session's landed commits in the
+handoff" plus one uncommitted increment: the legacy `size=`/`relief=` button
+options, recorded as **D027**. The tree is otherwise clean.
 
 Last session: 2026-09-07. Branch `gtk4-alpha`.
 
 Read `MODERNIZATION.md` and `AGENTS.md` first. This file only records where the
 previous session stopped and what the next one should verify before continuing.
+
+## Read this before picking ToggleButton
+
+The previous handoff recommended `ToggleButton` next, on the grounds that it is
+"a `Layout::Button` variant, so it reuses `%Buttons`, `_CreateButton`, and
+`_SetIcon` rather than adding a new shape". **That premise is wrong, and it was
+checked this session before any code was written.**
+
+`ToggleButton` is `Layout::TogButton` (`gmusicbrowser_layout.pm:602`, class at
+`:3805`). It is a `Gtk3::ToggleButton` subclass, not a `Layout::Button`. It has
+no `activate` and dispatches no command. Its entire purpose is showing and
+hiding *another* layout widget: it reads `widget`, `togglegroup`, and `resize`,
+and drives `::get_layout_widget`, `GetShowHideState`, `ShowHide`, and `Hide`,
+plus a `::Watch($self,'HiddenWidgets',...)` subscription.
+
+All **39** `ToggleButton`/`TogButton` option groups in `layouts/` carry
+`widget=`. Not one is a plain toggle. Verified with
+`grep -o 'To\(ggleButton\|gButton\)[0-9]*([^)]*)' layouts/*.layout` — 39
+matches, 0 without `widget=`. So porting `ToggleButton` means porting the
+layout show/hide subsystem first. That is a much larger unit than a `%Buttons`
+entry, and it is not a button increment at all.
+
+The same handoff also said `ToggleButton` "is the natural place to implement
+the two-state `stock="on:... off:..."` form, which `LockAlbum` (22) and
+`LockArtist` (22) also need". **Also wrong.** `ToggleButton` never uses that
+form; no layout passes it a `stock=` at all. The six sites that do use it are
+all `LockAlbum`/`LockArtist`, and those are `Layout::Button` with
+`button => 0` — `GtkEventBox` forms, not buttons — whose widget-table `stock`
+is already a hashref keyed by a `state` getter
+(`gmusicbrowser_layout.pm:144-155`). The string form at `:3023-3032` only
+*overrides* such a hash. Each state's value carries two icons and GTK3 shows
+the second on `enter_notify_event`. So that form needs state, the `EventBox`
+shape, and pointer hover — none of which is ported.
+
+What the previous handoff got right is the other half of its recommendation:
+`size=` and `relief=` were "the larger prize". That part was independent of
+`ToggleButton` and is what this session did.
 
 ## Actual state of the port
 
@@ -27,9 +61,9 @@ otherwise from the size of the planning documents.
 
 ## What is committed and what is not
 
-Everything is committed. `HEAD` is `b85b89d` and `gtk4-alpha` is ten commits
-past `master`:
+`HEAD` is `0074c06` and `gtk4-alpha` is ten commits past `master`:
 
+	0074c06 docs: record the session's landed commits in the handoff
 	b85b89d docs: decide AB and WB, and cover AB alignment on real Wayland
 	527eae9 gtk4: share one labels fixture across the renderer tests
 	fc65354 gtk4: render Filler and apply the legacy size request
@@ -41,13 +75,116 @@ past `master`:
 	d4c87d0 agents file
 	774aa2e initial plan
 
-No GTK3 production code, bundled layout, or file in `pix/` has been touched by
-any of the four increments this session. `gmusicbrowser.pl` is unmodified. The
-last increment changes no production code at all: it is two decision entries
-plus test coverage of an implementation that already existed.
+The `size=`/`relief=` increment described below is **not committed**. Modified,
+and nothing else:
 
-Files added this session: `tools/run-gtk3-smoke`, `t/RendererLabels.pm`,
-`t/layouts/sizing.layout`, `t/layouts/align.layout`.
+	gmusicbrowser_gtk4_layout.pm
+	t/04_Gtk4LayoutRenderer.t
+	t/gtk4/40_Icons.t
+	t/layouts/buttons.layout
+	t/layouts/icons.layout
+	docs/modernization/{DECISIONS,PARITY_CHECKLIST,TESTING,SESSION_HANDOFF}.md
+
+No GTK3 production code, bundled layout, or file in `pix/` has been touched by
+any increment on this branch. `gmusicbrowser.pl` is unmodified. No file has been
+added this session; the earlier ones added `tools/run-gtk3-smoke`,
+`t/RendererLabels.pm`, `t/layouts/sizing.layout`, and `t/layouts/align.layout`.
+
+## This session: the legacy `size=` and `relief=` button options
+
+The increment closes a correctness gap in the same class as `minwidth=` before
+it: `Layout::Button` sets `relief => 'none'` and `size => SIZE_BUTTONS` in
+`@default_options` (`gmusicbrowser_layout.pm:3001`), so both apply to **every**
+button, not only where a layout names them. The GTK4 renderer implemented
+neither, so every button it had already built was framed and theme-sized where
+GTK3 draws it flat at 24px. Recorded as **D027**, status **Proposed**.
+
+Both GTK3 APIs are gone in GTK4 and the replacements are not one-to-one:
+
+- `gtk_button_set_relief` is removed. `set_has_frame` is the replacement, and
+  `get_has_frame` reads back `1` and `''`, not `1`/`0`.
+- `GtkIconSize` was cut to `inherit`/`normal`/`large`, measuring 16, 16, and
+  32px. **Every legacy name is a fatal enum error through this binding**, not a
+  warning: `set_icon_size('menu')` dies with `FATAL: invalid enum GtkIconSize
+  value menu`. The enum cannot express the legacy set at all, since
+  `large-toolbar` is 24 and `dialog` is 48.
+
+So `size=` translates to `set_pixel_size`, which reproduces every legacy size
+exactly. The pixel values were read from `Gtk3::IconSize::lookup` on
+GTK 3.24.41 rather than assumed:
+
+| legacy `size=` | GTK3 pixels | uses in `layouts/` |
+|---|---:|---:|
+| `menu` (`SIZE_FLAGS`) | 16 | 54 |
+| `button` | 16 | 46 |
+| `large-toolbar` (`SIZE_BUTTONS`) | 24 | 16 |
+| `dialog` | 48 | 9 |
+| `small-toolbar` | 16 | 4 |
+| `dnd` | 32 | 0 |
+
+That is the whole GTK3 icon-size set, and the first five are exactly what
+appears in the bundled layouts, so **the translation is lossless** — unlike
+D025's fractional alignment case. Mapping onto the three-valued GTK4 enum was
+rejected as alternative 1 precisely because it is not.
+
+Three details worth carrying forward:
+
+- **Style the button's own image, not a replacement child.**
+  `Gtk4::Button->set_icon_name` builds the `GtkImage` itself and `get_child`
+  reaches it, so `set_pixel_size` lands there and `Button->get_icon_name` keeps
+  working. Substituting an explicit `Gtk4::Image` child leaves
+  `get_icon_name` undefined, which the renderer's own `_SetIcon`/
+  `_SetPlayLabel` and every existing icon assertion depend on. Measured both
+  ways before choosing.
+- **`Total(size=small)` is not an icon size.** Five sites in
+  `layouts/contrib.layout` use it; `Total` is a different widget and this is a
+  font size. A naive `grep -o 'size=[a-z-]*'` also picks up `minsize=`,
+  `picsize=`, and `ellipsize=end`, which is where an earlier reading of "37
+  end" and "171 blank" came from. Use `[(,]size=` to isolate the real option.
+- **An unrecognised `size=` is left to the theme and still reported.** It is
+  not guessed at, and `%ButtonHandled` reports `size` conditionally on the
+  value being in the mapping, so `Unhandled` stays honest.
+
+### The vacuous-assertion trap this increment hit
+
+A `measure()` check on an icon **only discriminates above 16px**. GTK4's own
+default icon size is 16, so the `menu`, `button`, and `small-toolbar` rows
+measure correctly even against a renderer that ignores `size=` entirely: three
+of the nine measure assertions pass against pristine. `get_pixel_size` is what
+actually pins those three, and the test now says so in a comment.
+
+This is the same class of trap as the recorded `set_size_request` one — a
+physical measurement that agrees with the expectation by coincidence rather
+than because the option took effect. Both are in D006. The lesson generalises:
+check every new physical assertion against pristine individually, not just the
+file's failure count.
+
+### Pixel size cannot be asserted offline
+
+The offline doubles have no icon theme, so `_IconTheme` returns undef,
+`_IconName` returns early, and **no icon resolves at all** — every button in
+`t/04_Gtk4LayoutRenderer.t` falls back to a text label with no image to size.
+Pixel-size assertions were written there first and had to be moved to
+`t/gtk4/40_Icons.t`, where a real theme resolves the icons. What the offline
+file can honestly prove is the relief default, the `Unhandled` bookkeeping, and
+that a text-fallback button is not handed a stray image.
+
+The doubles were extended to model the real behaviour rather than to satisfy
+the test: `set_icon_name` now creates a `Gtk4::Image` child, `set_label`
+removes it, and `Gtk4::Button` carries `has_frame` defaulting to 1, which is
+GTK4's real default.
+
+### Verification for this increment
+
+- `t/gtk4/40_Icons.t` fails **16 of 74** against a pristine `git archive HEAD`
+  with only the changed test files and fixtures overlaid, on real Wayland.
+- `t/04_Gtk4LayoutRenderer.t` fails **5 of 160** offline against the same.
+- Controls pass on both trees: `relief=normal keeps the frame`, the six
+  `isa_ok` image checks, both unknown-`size=` assertions, and `a real widget
+  reports the options it ignored`. The comparison discriminates rather than
+  merely failing everything.
+- No shared code changed. Only `gmusicbrowser_gtk4_layout.pm`, the two test
+  files, and the two fixtures. `make test-gtk3` was run anyway and passes.
 
 ## Renderer widget state
 
@@ -66,6 +203,13 @@ transport buttons whose commands the bridge exposes. Adding another means
 either widening `@Commands` again — now a proven, cheap operation with
 `make test-gtk3` available — or implementing a stateful button, which needs a
 state getter and an event subscription the way `Play` does.
+
+Every button the renderer builds now gets the legacy `Layout::Button` defaults,
+so `Play`, `Quit`, `Prev`, `Stop`, and `Next` are frameless 24px icon buttons
+matching GTK3, not framed theme-sized ones. See D027. `%ButtonHandled` now
+covers `icon`, `stock`, `text`, `tip`, `size`, and `relief`; what remains
+reported through `Unhandled` is `nbsongs`, `group`, `button=0`, and a `size=`
+value outside the mapping.
 
 `minwidth=`/`minheight=` now reach every widget and container, through
 `_ApplyCommonOptions`, which is the legacy `ApplyCommonOptions` size request
@@ -95,7 +239,7 @@ which reproduces both groups' legacy order including interleaved `-a b -c d`.
 exists yet. `_CreatePaned` implements `PanedPack`, and `_CreateSingle` covers
 `SB`, `FR`, `EB`, `AB`, and `WB`.
 
-## This session, fourth increment: D025/D026 for `AB` and `WB`
+## Previous session, fourth increment: D025/D026 for `AB` and `WB`
 
 The oldest outstanding item in this file, deferred four sessions running,
 is now written. Both entries are **Proposed** and both rows stay at
@@ -148,7 +292,7 @@ default `xscale=1` case fills its slot. **This is coverage of an implementation
 that already existed, not a proof of new behaviour** — the same file passes
 unchanged against the preceding commit. Do not cite it as an increment proof.
 
-## This session, third increment: the shared labels fixture
+## Previous session, third increment: the shared labels fixture
 
 `t/RendererLabels.pm` now holds the one `labels` hash the renderer tests pass,
 replacing 13 copies of a literal that had grown once per tooltip-bearing
@@ -173,7 +317,7 @@ Two things learned while doing it:
 production code and needs the `_"..."` gettext idiom, which is exactly what
 `t/RendererLabels.pm` must not contain.
 
-## This session, second increment: `Filler` and the legacy size request
+## Previous session, second increment: `Filler` and the legacy size request
 
 Two things, both pure-layout with no shared-boundary change.
 
@@ -229,7 +373,7 @@ inventory even though it has been implemented since the proof slice. That is a
 pre-existing documentation gap, now fixed. `Prev` was likewise missing from
 that inventory entirely before the previous increment.
 
-## This session, first increment: `Next` and `Prev`, and the first shared-boundary change
+## Previous session, first increment: `Next` and `Prev`, and the first shared-boundary change
 
 `Next` and `Prev` are now rendered, and `@Commands` in
 `gmusicbrowser_frontend_legacy.pm` was widened to expose `NextSong` and
@@ -509,13 +653,12 @@ fixture on a pristine archive:
 
 Commands that were actually run and passed this session:
 
-	perl -I. -c gmusicbrowser_frontend_legacy.pm
 	perl -I. -c gmusicbrowser_gtk4_layout.pm
 	perl -I. -c gmusicbrowser_gtk4.pl
-	perl -I. -c t/04_Gtk4LayoutRenderer.t t/05_FrontendLegacy.t \
-	      t/06_LifecycleLegacy.t t/gtk4/30_Box.t t/gtk4/40_Icons.t
-	                                             # one file per invocation
-	sh -n tools/run-gtk3-smoke
+	perl -I. -c gmusicbrowser_frontend_legacy.pm
+	perl -I. -c t/04_Gtk4LayoutRenderer.t
+	perl -I. -c t/gtk4/40_Icons.t
+	perl -I. -c t/RendererLabels.pm    # one file per invocation
 	prove --norc -I. t/02_LayoutParser.t t/03_FrontendContract.t \
 	      t/04_Gtk4LayoutRenderer.t t/05_FrontendLegacy.t t/06_LifecycleLegacy.t
 	make test-modernization
@@ -523,26 +666,36 @@ Commands that were actually run and passed this session:
 	make test-gtk3
 	git diff --check
 
-`make test-modernization`: **317** executed assertions passed, no skips.
-Running totals: 269 at the start of the session, 298 after `Next`/`Prev`, 315
-after `Filler`, 317 now. The skip count was read from `prove -v`, not assumed.
+`make test-modernization`: **325** executed assertions passed, no skips.
+Running totals: 269 two sessions ago, 298 after `Next`/`Prev`, 315 after
+`Filler`, 317 after the labels fixture, 325 after `size=`/`relief=`. The skip
+count was read from `prove -v`, not assumed.
 
-`make test-gtk4` on the real Wayland connection: **216** TAP results,
-comprising **210 executed assertions passed** and the same six pre-existing M1
+`make test-gtk4` on the real Wayland connection: **246** TAP results,
+comprising **240 executed assertions passed** and the same six pre-existing M1
 feasibility probes skipped, 0 failures. Per file: 18 binding (which is where
-all six skips live), 4 proof-of-life, 84 pane, 66 box, 44 icon. Running totals
-for the same command: 173 at the start of the session, 184 after `Next`/`Prev`,
-202 after `Filler`, 216 after the `AB` coverage. Do not restate this as 216
-passing assertions. The six skips were counted from `prove -v` output run
-through a copy of the runner in a scratch directory, not assumed.
+all six skips live), 4 proof-of-life, 84 pane, 66 box, 74 icon. Running totals
+for the same command: 173 before `Next`/`Prev`, 184 after it, 202 after
+`Filler`, 216 after the `AB` coverage, 246 now. Do not restate this as 246
+passing assertions. The six skips were counted by copying the runner to
+`tools/.verbose-smoke-tmp`, switching `prove` to `-v`, and grepping
+`^ok [0-9]+ # skip` — six matches, all `BLOCKED:` M1 probes in
+`t/gtk4/00_Binding.t`. Not assumed. Note that a copy of the runner placed
+*outside* `tools/` computes the wrong repository root from `dirname $0` and
+silently tests nothing; keep the copy in `tools/`.
 
 `make test-gtk3`: 1 assertion passed on the real Wayland connection, and the
 same command passed identically against a pristine `git archive` of HEAD with
 byte-identical diagnostics. Both runs emit the pre-existing missing
 `Net::DBus::Annotation` for the MPRIS2 plugin, the disabled mpv backend, and
 one `gtk_widget_get_scale_factor` GTK critical, and both exit 0. `Net::DBus`
-itself is still not installed, so `perl -I. -c gmusicbrowser.pl` still fails at
-line 512 — on the committed file too, so that is not a regression.
+itself is still not installed, so `perl -I. -c gmusicbrowser.pl` still fails —
+identically on the working tree and on a pristine `git archive` of HEAD, with
+`gmusicbrowser.pl` unmodified, so it is not a regression. Both line numbers
+appear and both are real: `Undefined subroutine &GMB::DBus::simple_call called
+at gmusicbrowser.pl line 512`, then `BEGIN failed--compilation aborted at
+gmusicbrowser.pl line 528`, which is where that `BEGIN` block closes. Earlier
+notes cite only 512; expect to see 528 as the abort line.
 
 `gmusicbrowser_layout.pm` was not changed and still is not standalone
 compilable: `perl -c` fails on its `_"..."` gettext idiom for the committed
@@ -691,18 +844,31 @@ means the reported ~1190px window is not the layout's designed size.
 
 ## Suggested next steps
 
-1. Extract the `labels` hash into a test fixture constant. **Done this
-   session**, as `t/RendererLabels.pm`. Add a new `%Buttons` tooltip there, not
-   at each call site.
-2. Next widget candidates, by instance count, excluding menus: `FilterPane`
-   (75), `Window` (39), `SimpleSearch` (38), `ToggleButton` (38).
-   `ToggleButton` is the most tractable: it is a `Layout::Button` variant with
-   `toggle` state, so it reuses `%Buttons` and `_SetIcon` and would exercise
-   the two-state `stock="on:... off:..."` form that `LockAlbum`/`LockArtist`
-   also need. `Window` is a container-level concept and probably belongs with
-   `@layout` embedding. `MenuItem` (103) and `SeparatorMenuItem` (32) are the
-   two most-used elements overall but are the `GMenu`/`PopoverMenu` design
-   change — **ask the user first.**
+1. **Decide D027**, which this session wrote as **Proposed**. It is the
+   narrowest of the open decisions: the translation is lossless and measured
+   in both toolkits, so the question is only whether `set_has_frame` versus
+   `add_css_class('flat')` is the right relief route (alternative 3). Every
+   button row is blocked behind it, because until it is accepted the renderer's
+   button sizing is an unaccepted approximation on paper even though it is
+   exact in fact.
+2. Next widget candidates. **Do not take `ToggleButton` as a button
+   increment** — see the section at the top of this file for why the previous
+   recommendation was wrong. Corrected reading:
+   - `ToggleButton` (39 option groups, all with `widget=`) needs the layout
+     show/hide subsystem: `ShowHide`, `Hide`, `GetShowHideState`,
+     `get_layout_widget`, and the `HiddenWidgets` watch. That is the real
+     unit of work, and it is a subsystem port, not a widget port. It may
+     still be the right next increment, but scope it as show/hide.
+   - `LockAlbum`/`LockArtist` (22 each) need state, the `button=0` EventBox
+     shape, and pointer hover for the second icon in each state. Not a
+     `%Buttons` entry.
+   - `Window` is a container-level concept and probably belongs with `@layout`
+     embedding. `SimpleSearch` and `FilterPane` are list/model widgets and are
+     gated behind the unproven M1 `GListModel` probe.
+   - `MenuItem` and `SeparatorMenuItem` are the two most-used elements overall
+     but are the `GMenu`/`PopoverMenu` design change — **ask the user first.**
+   Instance counts in this file have been recorded wrong repeatedly; treat any
+   figure here as needing a hand check before it drives a decision.
 3. Keep running `make test-gtk4` on the real Wayland connection with the system
    packages, outside the execution sandbox when needed. Count explicit skips.
    Also run `make test-gtk3` after any shared-code change; it works now.
@@ -714,8 +880,9 @@ means the reported ~1190px window is not the layout's designed size.
 5. D006 binding evidence. **Already recorded, keep extending it.** D006 now
    holds the graphene marshalling failure, the `->can` segfault, the
    widget-before-`Gtk4::init` segfault, the empty-string boolean artifact, the
-   `set_theme_name` display-singleton refusal, and this session's
-   `get_size_request`/`set_size_request`/`measure` findings.
+   `set_theme_name` display-singleton refusal, the
+   `get_size_request`/`set_size_request`/`measure` findings, and this session's
+   fatal-enum, `Button`-image-child, and `set_has_frame` findings.
 6. Move D023 from Proposed to Accepted, or push back on it, before more
    icon-bearing widgets are added. D024 is now in the same position: both are
    Proposed and both concern icon resolution, so decide them together.
@@ -740,6 +907,45 @@ means the reported ~1190px window is not the layout's designed size.
 
 ## Working notes
 
+- **`ToggleButton` is `Layout::TogButton`, not a `Layout::Button` variant.** It
+  is a show/hide controller for other layout widgets and dispatches no command.
+  See the section at the top of this file before scoping it.
+- **An out-of-range enum nickname is fatal through this binding.**
+  `Image->set_icon_size('menu')` dies with `FATAL: invalid enum GtkIconSize
+  value menu, expecting: inherit / normal / large`. So a legacy GTK3 enum
+  nickname cannot be passed through and probed for afterwards — map it first.
+  `GtkIconSize` measures 16px for `inherit` and `normal`, 32px for `large`.
+- **`Gtk3::IconSize::lookup` takes the numeric enum, not the nickname,** through
+  this binding. Passing `'menu'` warns `Argument "menu" isn't numeric` and
+  returns zeros, which looks like the sizes are unavailable. Pass 1..6
+  (`menu`, `small-toolbar`, `large-toolbar`, `button`, `dnd`, `dialog`) and it
+  returns `(ok, width, height)`. Also note an *unrealized* `Gtk3::Image`
+  measures 0, so read the sizes from `lookup`, not from `get_preferred_width`.
+- **`Button->set_icon_name` creates the `Gtk4::Image` child itself,** reachable
+  through `get_child`; `set_pixel_size` on it works and shows up in `measure`.
+  `set_label` replaces that child. Style the button's own image: substituting
+  an explicit `Gtk4::Image` leaves `Button->get_icon_name` undefined, which the
+  renderer and every existing icon assertion rely on.
+- `Button->set_relief`/`get_relief` are absent. `set_has_frame` is the
+  replacement, `get_has_frame` reads back `1` and `''` rather than `1`/`0`, and
+  GTK4's default is framed. `add_css_class('flat')` also works.
+- **Nothing about icon size can be asserted in the offline doubles.** They have
+  no display, so `_IconTheme` returns undef, `_IconName` returns early, and no
+  icon resolves at all — every button falls back to a text label with no image.
+  Icon-size assertions belong in `t/gtk4/40_Icons.t`.
+- **A `measure()` check on an icon only discriminates above 16px,** because
+  GTK4's default icon size is 16. `size=menu`, `size=button`, and
+  `size=small-toolbar` measure correctly even against a renderer that ignores
+  `size=`. Pair every such measurement with `get_pixel_size`, and check each
+  new assertion against pristine individually rather than trusting the file's
+  failure count.
+- **Isolate the real option when grepping layouts for `size=`.** A plain
+  `grep -o 'size=[a-z-]*'` also matches `minsize=`, `picsize=`, and
+  `ellipsize=end`; use `[(,]size=`. And `Total(size=small)` is a font size on a
+  different widget, not an icon size.
+- **A copy of `tools/run-gtk4-smoke` placed outside `tools/` tests nothing.**
+  It computes the repository root from `dirname $0`, so it silently runs no
+  test files and reports success. Keep any modified copy inside `tools/`.
 - The layout parser already recognizes all 15 container types and already
   extracts `HP`/`VP` packing with the correct `([_+]*)` regex. Gaps are in the
   renderer, not the parser.
