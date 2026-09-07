@@ -701,6 +701,82 @@ $zrenderer->Destroy;
 	is($renderer->{style_rules},undef,'Destroy drops the collected style rules');
 }
 
+# Layout-level inheritance of DefaultFont/DefaultFontColor. Legacy InitLayout
+# reads them into {global_options} (gmusicbrowser_layout.pm:971) and NewWidget
+# merges them into every widget (:1162), but both fall back with || - at :1163
+# for the font and at :3120 for the colour - so a widget's own font=/color=
+# wins. The parser keeps them in {metadata}, which the renderer previously
+# never read at all.
+{	my $ifixture=File::Spec->catfile('t','layouts','inherit.layout');
+	my $icatalog=Layout::Parser::ParseFiles(files=>[$ifixture]);
+	is(scalar @{$icatalog->{diagnostics}},0,'inherit fixture parses without diagnostics');
+	my $renderer=Layout::Renderer::Gtk4->new
+	(	catalog=>$icatalog,
+		frontend=>$frontend,
+		labels=>GMB::Test::RendererLabels::labels(),
+	);
+
+	# A grey global is the one inheritance path these doubles can assert, since
+	# dim-label ships with GTK4 and needs no provider.
+	$renderer->Render('gtk4 inherit grey');
+	is_deeply($renderer->{globals},{color=>'grey'},
+		'a layout-wide DefaultFontColor is read from the parser metadata');
+	ok($renderer->Widget('Text')->has_css_class('dim-label'),
+		'a label with no color= inherits the layout DefaultFontColor');
+	is($renderer->Unhandled('Text'),undef,'an inherited colour that applies is not reported');
+	# The legacy precedence: the widget's own value wins over the global. Both
+	# labels must end up in a DIFFERENT state for this to turn on the option -
+	# asserting that Text2 merely lacks dim-label passes against a renderer
+	# that never applies dim-label to anything.
+	ok(!$renderer->Widget('Text2')->has_css_class('dim-label'),
+		"a widget's own color= overrides the inherited DefaultFontColor");
+	isnt($renderer->Widget('Text')->has_css_class('dim-label') ? 1 : 0,
+		$renderer->Widget('Text2')->has_css_class('dim-label') ? 1 : 0,
+		'the inheriting and the overriding label differ in their styling');
+	is_deeply($renderer->Unhandled('Text2'),['color'],
+		"the overriding color= is what gets reported, not the inherited grey");
+	$renderer->Destroy;
+
+	# A global needing a generated rule cannot be installed without a display,
+	# so it is reported - but against the layout, because no widget's options
+	# named it and attributing it to every inheriting widget would be wrong.
+	$renderer->Render('gtk4 inherit');
+	is_deeply($renderer->{globals},{font=>'20',color=>'white'},
+		'both layout-wide globals are read');
+	is_deeply($renderer->UnhandledGlobals,{font=>1,color=>1},
+		'globals needing a provider are reported against the layout');
+	is($renderer->Unhandled('Text'),undef,
+		'a widget inheriting an untranslatable global reports no option of its own');
+	# a widget naming its own value is reported under its own name as before
+	is_deeply($renderer->Unhandled('Text2'),['font'],
+		"a widget's own font= is still reported under the widget");
+	ok($renderer->Widget('Text3')->has_css_class('dim-label'),
+		'an explicit grey still applies while a global is present');
+	# the widget's own refused value is taken rather than falling through to
+	# the global, which is what || does in the legacy code
+	is_deeply([sort @{$renderer->Unhandled('Text4')}],['color','font'],
+		"a widget's own refused values are reported, not replaced by the globals");
+	$renderer->Destroy;
+	is($renderer->UnhandledGlobals,undef,'Destroy drops the reported globals');
+	is($renderer->{globals},undef,'Destroy drops the collected globals');
+
+	# Controls. A layout with no globals must behave exactly as before, and a
+	# refused global must not be silently swallowed.
+	$renderer->Render('gtk4 inherit none');
+	is_deeply($renderer->{globals},{},'a layout with no globals collects none');
+	is_deeply($renderer->Widget('Text')->get_css_classes,[],
+		'a label in a layout with no globals gets no css class');
+	is($renderer->UnhandledGlobals,undef,'a layout with no globals reports none');
+	$renderer->Destroy;
+
+	$renderer->Render('gtk4 inherit refused');
+	is_deeply($renderer->UnhandledGlobals,{font=>1,color=>1},
+		'an untranslatable global is reported rather than dropped');
+	is_deeply($renderer->Widget('Text')->get_css_classes,[],
+		'an untranslatable global leaves the label unstyled');
+	$renderer->Destroy;
+}
+
 # The font= and colour translation itself, independent of any display. These
 # are the arithmetic and the grey classification, which is where the parity
 # exception in D031 actually lives.

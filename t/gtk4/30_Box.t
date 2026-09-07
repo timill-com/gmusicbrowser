@@ -487,4 +487,106 @@ _drain();
 	_drain();
 }
 
+# Layout-level inheritance of DefaultFont/DefaultFontColor as real rendering.
+# Legacy InitLayout reads them into {global_options} (gmusicbrowser_layout.pm:971)
+# and NewWidget merges them into every widget (:1162), but both fall back with
+# || - at :1163 for the font and :3120 for the colour - so a widget's own
+# font=/color= wins. They reuse the D031 provider, so DefaultFont is a ratio of
+# the theme font just as font= is.
+{	my $ifixture=File::Spec->catfile('t','layouts','inherit.layout');
+	my $icatalog=Layout::Parser::ParseFiles(files=>[$ifixture]);
+	is(scalar @{$icatalog->{diagnostics}},0,'inherit fixture parses without diagnostics');
+
+	# The unstyled baseline comes from a SEPARATE layout with no globals, so
+	# the comparison is against a genuinely untouched label rather than against
+	# another inheriting one.
+	my $plainrenderer=Layout::Renderer::Gtk4->new
+	(	catalog=>$icatalog,
+		frontend=>$frontend,
+		labels=>GMB::Test::RendererLabels::labels(),
+	);
+	my $proot=$plainrenderer->Render('gtk4 inherit none');
+	$proot->set_direction('ltr');
+	my $pwindow=Gtk4::Window->new;
+	$pwindow->set_default_size(700,300);
+	$pwindow->set_child($proot);
+	$pwindow->present;
+	ok(_wait_for_window($pwindow),'GTK4 window mapped before the baseline measurement');
+	_drain();
+	my $baseline=($plainrenderer->Widget('Text')->measure('vertical',-1))[0];
+	my $themecolor=$plainrenderer->Widget('Text')->get_style_context->get_color->to_string;
+	ok(!grep(m/^gmb-font-|^gmb-color-|^dim-label$/,
+		@{$plainrenderer->Widget('Text')->get_css_classes}),
+		'a label in a layout with no globals carries no styling class');
+
+	my $irenderer=Layout::Renderer::Gtk4->new
+	(	catalog=>$icatalog,
+		frontend=>$frontend,
+		labels=>GMB::Test::RendererLabels::labels(),
+	);
+	my $iroot=$irenderer->Render('gtk4 inherit');
+	$iroot->set_direction('ltr');
+	my $iwindow=Gtk4::Window->new;
+	$iwindow->set_default_size(700,300);
+	$iwindow->set_child($iroot);
+	$iwindow->present;
+	ok(_wait_for_window($iwindow),'GTK4 window mapped before inheritance assertions');
+	_drain();
+
+	# every label in the fixture carries the identical text 'Wg', so only the
+	# inherited or explicit option can change the measurement
+	my %ih=map {($_=>($irenderer->Widget($_)->measure('vertical',-1))[0])}
+		qw/Text Text2 Text3 Text4/;
+	# DefaultFont=20 reaches a label that names no font= of its own
+	cmp_ok($ih{Text},'>',$baseline,
+		'a label with no font= renders larger under an inherited DefaultFont=20');
+	ok($irenderer->Widget('Text')->has_css_class('gmb-font-200'),
+		'an inherited DefaultFont=20 becomes the same 200% ratio as a font=20');
+	# and the widget's own font= still wins, in the opposite direction, so this
+	# turns on the precedence rather than merely on a class being present
+	cmp_ok($ih{Text2},'<',$baseline,
+		"a widget's own font=8 overrides the inherited DefaultFont=20");
+	ok($irenderer->Widget('Text2')->has_css_class('gmb-font-80'),
+		'the overriding font=8 keeps its own 80% ratio');
+	ok(!$irenderer->Widget('Text2')->has_css_class('gmb-font-200'),
+		'the overridden DefaultFont leaves no ratio class behind');
+	# the two globals are inherited independently: overriding one must not
+	# discard the other, which is what merging them per option rather than as
+	# a pair gets right
+	is($irenderer->Widget('Text2')->get_style_context->get_color->to_string,
+		'rgb(255,255,255)',
+		'overriding the font still leaves the inherited DefaultFontColor applied');
+	ok($irenderer->Widget('Text3')->has_css_class('gmb-font-200'),
+		'overriding the colour still leaves the inherited DefaultFont applied');
+
+	# DefaultFontColor=white likewise reaches a label naming no color=
+	is($irenderer->Widget('Text')->get_style_context->get_color->to_string,
+		'rgb(255,255,255)',
+		'an inherited DefaultFontColor reaches the rendered text colour');
+	isnt($irenderer->Widget('Text')->get_style_context->get_color->to_string,$themecolor,
+		'the inherited colour differs from the theme colour');
+	# an explicit color=grey overrides the inherited white, as it does in GTK3
+	ok($irenderer->Widget('Text3')->has_css_class('dim-label'),
+		"a widget's own color=grey overrides the inherited DefaultFontColor");
+	is($irenderer->Widget('Text3')->get_style_context->get_color->to_string,$themecolor,
+		'the overridden white does not reach the explicitly greyed label');
+	# a widget's own refused value is taken rather than falling through to the
+	# global, which is what || does in the legacy code
+	is($ih{Text4},$baseline,
+		"a widget's own unparseable font= falls back to the theme, not to the global");
+	is($irenderer->Widget('Text4')->get_style_context->get_color->to_string,$themecolor,
+		"a widget's own invalid colour falls back to the theme, not to the global");
+	is_deeply([sort @{$irenderer->Unhandled('Text4')}],['color','font'],
+		"a widget's own refused values are reported under the widget");
+	# with a provider available nothing is left over to report against the layout
+	is($irenderer->UnhandledGlobals,undef,
+		'globals that apply are not reported against the layout');
+
+	$irenderer->Destroy;
+	$iwindow->destroy;
+	$plainrenderer->Destroy;
+	$pwindow->destroy;
+	_drain();
+}
+
 done_testing;

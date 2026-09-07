@@ -151,7 +151,24 @@ sub Render
 	$self->{layout}=$layout;
 	$self->{nodes}={map {$_->{name}=>$_} @{$layout->{nodes}}};
 	$self->{stack}={};
+	$self->{globals}=_Globals($layout);
 	return $self->_CreateContainer($layout->{roots}[0]);
+}
+
+# The layout-wide presentation globals, which legacy InitLayout reads into
+# {global_options} (gmusicbrowser_layout.pm:971) and NewWidget then merges into
+# every widget's options (:1162). The parser keeps them in {metadata}, since
+# they are layout properties rather than widget options.
+#
+# Only these two are read. PATH, SkinPath, and SkinFile belong to the skin
+# machinery, which is not ported.
+my %Globals= (DefaultFont=>'font', DefaultFontColor=>'color');
+
+sub _Globals
+{	my $layout=shift;
+	my $metadata=$layout->{metadata} || {};
+	return {map {($Globals{$_}=>$metadata->{$_})}
+		grep defined $metadata->{$_}, sort keys %Globals};
 }
 
 sub Widget
@@ -165,6 +182,13 @@ sub Unhandled
 	return defined $name ? $self->{unhandled}{$name} : $self->{unhandled};
 }
 
+# The same for a layout-wide global whose value could not be translated. It is
+# kept apart from the per-widget list because no widget's options named it, so
+# reporting it against every inheriting widget would misattribute it.
+sub UnhandledGlobals
+{	return $_[0]{unhandled_globals};
+}
+
 sub Destroy
 {	my $self=shift;
 	$self->{frontend}->Unsubscribe($_) for @{$self->{subscriptions}};
@@ -176,6 +200,8 @@ sub Destroy
 	}
 	$self->{widgets}={};
 	$self->{unhandled}={};
+	delete $self->{unhandled_globals};
+	delete $self->{globals};
 	# the style provider is installed on the display, so it outlives the widget
 	# tree unless it is taken off again
 	if (my $provider=delete $self->{style_provider})
@@ -607,13 +633,24 @@ sub _ApplyLabelOptions
 	my $ellipsize=_Ellipsize($values->{ellipsize});
 	$widget->set_ellipsize($ellipsize) if defined $ellipsize;
 	# font=/color= become style classes; a value that cannot be translated, or
-	# a display with no provider at all, leaves the option reported instead
+	# a display with no provider at all, leaves the option reported instead.
+	# A widget with neither inherits the layout's DefaultFont/DefaultFontColor,
+	# which is the legacy precedence at gmusicbrowser_layout.pm:1163 and :3120:
+	# both spell the fallback with ||, so the widget's own value wins.
+	my $globals=$self->{globals} || {};
 	my %styled;
 	for my $key (qw/font color/)
-	{	next unless defined $values->{$key};
+	{	my $value= defined $values->{$key} ? $values->{$key} : $globals->{$key};
+		next unless defined $value;
 		my $method= $key eq 'font' ? '_FontRule' : '_ColorRule';
-		my $class=$self->$method($values->{$key});
-		next unless defined $class;
+		my $class=$self->$method($value);
+		# an inherited value the renderer cannot translate is a layout-level
+		# problem, so it is reported against the layout rather than against a
+		# widget whose options never named it
+		unless (defined $class)
+		{	$self->{unhandled_globals}{$key}=1 unless defined $values->{$key};
+			next;
+		}
 		$widget->add_css_class($class);
 		$styled{$key}=1;
 	}

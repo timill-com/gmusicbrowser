@@ -1,0 +1,20 @@
+[gtk4 inherit]
+Type=G
+DefaultFont=20
+DefaultFontColor=white
+VBroot= Text(text="Wg") Text2(text="Wg",font=8) Text3(text="Wg",color=grey) Text4(text="Wg",font=oops,color=notacolour!)
+
+[gtk4 inherit grey]
+Type=G
+DefaultFontColor=grey
+VBroot= Text(text="Wg") Text2(text="Wg",color=white)
+
+[gtk4 inherit refused]
+Type=G
+DefaultFont=nosize
+DefaultFontColor=notacolour!
+VBroot= Text(text="Wg")
+
+[gtk4 inherit none]
+Type=G
+VBroot= Text(text="Wg")
