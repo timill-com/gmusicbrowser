@@ -669,9 +669,18 @@ the label one changed `gmusicbrowser_gtk4_layout.pm`,
 both cases.
 
 No GTK3 production code, bundled layout, or file in `pix/` has been touched by
-any increment on this branch. `gmusicbrowser.pl` is unmodified. No file has been
-added this session; the earlier ones added `tools/run-gtk3-smoke`,
-`t/RendererLabels.pm`, `t/layouts/sizing.layout`, and `t/layouts/align.layout`.
+any increment on this branch.
+
+**`gmusicbrowser.pl` is not unmodified at branch scope, and an earlier revision
+of this file said it was.** `git diff master HEAD -- gmusicbrowser.pl` reports
+109 insertions and 49 deletions, all from `ec217bc initial gtk4 stubs`, the
+branch's first commit — it wired in the frontend boundary
+(`gmusicbrowser_frontend.pm`, `gmusicbrowser_frontend_legacy.pm`, the
+`$Frontend`/`$FrontendLegacy` globals and the frontend state hash). What is
+true, and is what the claim was reaching for, is that **no layout increment has
+touched it**: check with `git diff --name-only <increment-base> HEAD` rather
+than trusting a blanket statement. Its `perl -c` failure is a missing
+`Net::DBus`, not that change, and reproduces on a pristine archive of HEAD.
 
 ## This session, first increment: the legacy `size=` and `relief=` button options
 
