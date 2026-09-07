@@ -517,10 +517,14 @@ is_deeply([$zrenderer->Widget('HBfillers')->get_size_request],[-1,-1],'a contain
 	# ellipsize is the same Pango enum in both toolkits
 	is($lrenderer->Widget('Text')->get_ellipsize,'end','ellipsize=end passes through');
 	is($lrenderer->Widget('Text2')->get_ellipsize,'none','ellipsize=none passes through');
-	# Layout::Label does not map '1' to 'end' the way Layout::Button does, and an
-	# out-of-range value is fatal through this binding, so it must not be passed on
-	is($lrenderer->Widget('Text3')->get_ellipsize,'none','an out-of-range ellipsize is left alone');
-	is_deeply($lrenderer->Unhandled('Text3'),['ellipsize'],'an out-of-range ellipsize is reported');
+	# D028 normalises ellipsize=1 to 'end', following Layout::Button (:3051)
+	# rather than Layout::Label, which leaves such a label un-ellipsized
+	is($lrenderer->Widget('Text3')->get_ellipsize,'end','ellipsize=1 is normalised to end');
+	is($lrenderer->Unhandled('Text3'),undef,'a normalised ellipsize is not reported');
+	# an out-of-range value is fatal through this binding, so it must not be
+	# passed on; reaching this line at all proves it was filtered
+	is($lrenderer->Widget('Text5')->get_ellipsize,'none','an out-of-range ellipsize is left alone');
+	is_deeply($lrenderer->Unhandled('Text5'),['ellipsize'],'an out-of-range ellipsize is reported');
 	is($lrenderer->Widget('Text4')->get_xalign,0,'a non-numeric xalign falls back to the legacy default');
 	is_deeply($lrenderer->Unhandled('Text4'),['xalign'],'a non-numeric xalign is reported');
 	is($lrenderer->Unhandled('Label6'),undef,'handled alignment options are not reported');

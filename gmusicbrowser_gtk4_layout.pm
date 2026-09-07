@@ -501,10 +501,12 @@ sub _ApplyCommonOptions
 # bucketed. GTK4's own default is .5/.5, so a Label built without this is
 # centred where GTK3 left-aligns it.
 #
-# ellipsize: the same Pango enum in both toolkits, passed through unchanged as
-# legacy Layout::Label does (:3127). Note Layout::Button maps '1' to 'end'
-# (:3051) but Layout::Label does not, and an out-of-range value is fatal through
-# this binding, so anything but a Pango mode is reported rather than passed on.
+# ellipsize: the same Pango enum in both toolkits. Legacy Layout::Label passes
+# the value through unchanged (:3127), so 'ellipsize=1' does not ellipsize in
+# GTK3, while Layout::Button maps '1' to 'end' (:3051). D028 normalises the
+# label to the button's reading, which is a deliberate parity exception: no
+# bundled layout uses the form. An out-of-range value is fatal through this
+# binding, so anything but a Pango mode is still reported rather than passed on.
 sub _ApplyLabelOptions
 {	my ($self,$widget,$node)=@_;
 	my $values=$node->{options}{values};
@@ -518,14 +520,23 @@ sub _ApplyLabelOptions
 		my $method="set_$key";
 		$widget->$method($opt{$key}+0);
 	}
-	my $ellipsize=$values->{ellipsize};
-	$widget->set_ellipsize($ellipsize)
-		if defined $ellipsize && $Ellipsize{$ellipsize};
+	my $ellipsize=_Ellipsize($values->{ellipsize});
+	$widget->set_ellipsize($ellipsize) if defined $ellipsize;
 	my @ignored=grep { !$LabelHandled{$_}
-		|| ($_ eq 'ellipsize' && !$Ellipsize{$values->{$_} || ''})
+		|| ($_ eq 'ellipsize' && !defined _Ellipsize($values->{$_}))
 		|| ($_=~m/^[xy]align$/ && $values->{$_}!~m/^[0-9]*\.?[0-9]+$/) }
 		@{$node->{options}{order}};
 	$self->{unhandled}{$node->{name}}=\@ignored if @ignored;
+}
+
+# The Pango mode a legacy ellipsize= asks for, or undef if it names none. '1' is
+# the Layout::Button spelling of 'end' (gmusicbrowser_layout.pm:3051), accepted
+# here as well under D028.
+sub _Ellipsize
+{	my $value=shift;
+	return undef unless defined $value;
+	$value='end' if $value eq '1';
+	return $Ellipsize{$value} ? $value : undef;
 }
 
 # The legacy relief= and size= options, which apply to every Layout::Button

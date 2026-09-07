@@ -334,10 +334,18 @@ _drain();
 	my ($cmin)=$lrenderer->Widget('Text')->measure('horizontal',-1);
 	my ($kmin)=$lrenderer->Widget('Text2')->measure('horizontal',-1);
 	cmp_ok($cmin,'<',$kmin,'ellipsize=end lowers the minimum width below the un-ellipsized one');
+	# D028 normalises ellipsize=1 to 'end'. Text3 carries the same text as both
+	# labels above, so matching Text's lowered minimum is the physical effect
+	# rather than a property read-back; against an un-normalised renderer it
+	# measures the full text width like Text2.
+	my ($nmin)=$lrenderer->Widget('Text3')->measure('horizontal',-1);
+	is($nmin,$cmin,'ellipsize=1 lowers the minimum width exactly as ellipsize=end does');
+	cmp_ok($nmin,'<',$kmin,'ellipsize=1 is normalised rather than left un-ellipsized');
+	is($lrenderer->Widget('Text3')->get_ellipsize,'end','ellipsize=1 is normalised to end');
 	# an out-of-range ellipsize would be a fatal enum error through this binding,
 	# so reaching this line at all proves it was filtered rather than passed on
-	is($lrenderer->Widget('Text3')->get_ellipsize,'none','an out-of-range ellipsize is left at the default');
-	is_deeply($lrenderer->Unhandled('Text3'),['ellipsize'],'an out-of-range ellipsize is reported');
+	is($lrenderer->Widget('Text5')->get_ellipsize,'none','an out-of-range ellipsize is left at the default');
+	is_deeply($lrenderer->Unhandled('Text5'),['ellipsize'],'an out-of-range ellipsize is reported');
 
 	$lrenderer->Destroy;
 	$lwindow->destroy;
