@@ -43,6 +43,35 @@ use lib '.';
 			defined $self->{req_height} ? $self->{req_height} : -1);
 	}
 	sub set_size_request { @{$_[0]}{qw/req_width req_height/}=@_[1,2] }
+	# _SetConstraints reads the child's minimum before realization; real GTK
+	# returns (minimum, natural, min_baseline, nat_baseline) and spells an
+	# unset dimension -1
+	sub measure
+	{	my ($self,$orientation)=@_;
+		my $key= $orientation eq 'horizontal' ? 'req_width' : 'req_height';
+		my $min= defined $self->{$key} ? $self->{$key} : 0;
+		$min=0 if $min<0;
+		return ($min,$min,-1,-1);
+	}
+	sub set_layout_manager { $_[0]{layout_manager}=$_[1] }
+}
+{	package Gtk4::ConstraintLayout;
+	sub new { bless {constraints=>[]},$_[0] }
+	sub add_constraint { push @{$_[0]{constraints}},$_[1] }
+}
+{	package Gtk4::Constraint;
+	# the real constructor takes
+	# (target,target_attribute,relation,source,source_attribute,multiplier,
+	#  constant,strength); strength must be the numeric enum
+	sub new
+	{	my ($class,@a)=@_;
+		my %c; @c{qw/target target_attribute relation source source_attribute
+			multiplier constant strength/}=@a;
+		return bless \%c,$class;
+	}
+	sub get_multiplier { $_[0]{multiplier} }
+	sub get_constant { $_[0]{constant} }
+	sub get_strength { $_[0]{strength} }
 }
 {	package Gtk4::Box;
 	our @ISA=('Gtk4::Widget::Double');
@@ -355,6 +384,63 @@ is($expander->{expanded},1,'EB restores the saved expanded state');
 my $aligned=$srenderer->Widget('Label4');
 is($aligned->{halign},'end','AB xalign=1 with xscale=0 aligns the child to the end');
 is($aligned->{valign},'start','AB yalign=0 with yscale=0 aligns the child to the start');
+is($srenderer->Widget('ABalign')->{layout_manager},undef,
+	'an AB with integral values keeps the plain box layout');
+
+# A fractional xalign/xscale has no halign/valign enum to land on, so the AB
+# container takes a Gtk4::ConstraintLayout expressing the legacy arithmetic
+# (D025 alternative 4). The constants are checked here; only a real allocation
+# shows the solver applying them, which t/gtk4/30_Box.t does.
+{	my $afixture=File::Spec->catfile('t','layouts','align.layout');
+	my $acatalog=Layout::Parser::ParseFiles(files=>[$afixture]);
+	is(scalar @{$acatalog->{diagnostics}},0,'align fixture parses without diagnostics');
+	my $arenderer=Layout::Renderer::Gtk4->new
+	(	catalog=>$acatalog,
+		frontend=>$frontend,
+		labels=>GMB::Test::RendererLabels::labels(),
+	);
+	$arenderer->Render('gtk4 align');
+	# the integral cases must not gain a constraint layout, or the common path
+	# every bundled layout uses has regressed
+	for my $box (qw/ABstart ABcenter ABend ABfill/)
+	{	is($arenderer->Widget($box)->{layout_manager},undef,
+			"$box stays on the plain box layout");
+	}
+	my $frac=$arenderer->Widget('ABfrac')->{layout_manager};
+	isa_ok($frac,'Gtk4::ConstraintLayout');
+	is(scalar @{$frac->{constraints}},4,
+		'a fractional AB gets one size and one position constraint per axis');
+	# minimum comes from the child's measure(); the doubles model the -1 unset
+	# convention, and this fixture requests no size, so the minimum is 0
+	my ($width)=grep {$_->{target_attribute} eq 'width'} @{$frac->{constraints}};
+	my ($left)=grep {$_->{target_attribute} eq 'left'} @{$frac->{constraints}};
+	is($width->{multiplier},0,'xscale=0 makes the size independent of the slot');
+	is($left->{multiplier},0.3,'xalign=0.3 reaches the position multiplier unbucketed');
+	is($left->{strength},1001001000,
+		'constraints use the numeric required strength, which this binding needs');
+	is($left->{relation},'eq','a legacy alignment is an equality, not an inequality');
+	is($left->{source_attribute},'width',
+		'the position is expressed against the slot width so it stays linear');
+	my $scale=$arenderer->Widget('ABscale')->{layout_manager};
+	my ($swidth)=grep {$_->{target_attribute} eq 'width'} @{$scale->{constraints}};
+	is($swidth->{multiplier},0.5,
+		'a fractional xscale reaches the size multiplier rather than becoming a fill');
+	# a scale of .5 has no enum even though an alignment of .5 is 'center'
+	isa_ok($scale,'Gtk4::ConstraintLayout');
+	# GTK3 coerces a non-numeric value to 0 and the legacy default is centred,
+	# so the value is dropped rather than reaching the constraint arithmetic
+	is($arenderer->Widget('ABbad')->{layout_manager},undef,
+		'a non-numeric xalign falls back to the legacy default, not a constraint');
+	is($arenderer->Widget('Label8')->{halign},'center',
+		'a non-numeric xalign renders where the legacy default does');
+	is_deeply($arenderer->Unhandled('ABbad'),['xalign'],
+		'a rejected alignment value is reported rather than silently dropped');
+	is($arenderer->Unhandled('ABfrac'),undef,
+		'a fractional alignment the constraint path implements is not reported');
+	is($arenderer->Unhandled('ABscale'),undef,
+		'a fractional scale the constraint path implements is not reported');
+	$arenderer->Destroy;
+}
 
 # GTK4 has no GtkEventBox; WB becomes a plain box that can own controllers
 my $event=$srenderer->Widget('WBevent');

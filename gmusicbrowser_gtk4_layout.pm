@@ -351,7 +351,7 @@ sub _CreateSingle
 	$self->{widgets}{$node->{name}}=$container;
 	return $container unless @children;
 	my $widget=$self->_CreateChild($children[0]);
-	$self->_SetAlignment($widget,$values) if $element eq 'AB';
+	$self->_SetAlignment($widget,$container,$values,$node->{name}) if $element eq 'AB';
 	if ($element eq 'AB' || $element eq 'WB') { $container->append($widget) }
 	else { $container->set_child($widget) }
 	return $container;
@@ -359,11 +359,65 @@ sub _CreateSingle
 
 # legacy AB defaults: xalign/yalign .5, xscale/yscale 1. A scale of 0 keeps the
 # child at its natural size so the alignment is visible, otherwise it fills.
+# halign/valign express that exactly whenever both numbers are integral, which
+# is every bundled layout, so the common path stays a plain property set. A
+# fractional value has no enum to land on and goes through _SetConstraints
+# instead (D025 alternative 4).
 sub _SetAlignment
-{	my ($self,$widget,$values)=@_;
-	my %opt=(xalign=>.5, yalign=>.5, xscale=>1, yscale=>1, %$values);
+{	my ($self,$widget,$container,$values,$name)=@_;
+	my %default=(xalign=>.5, yalign=>.5, xscale=>1, yscale=>1);
+	my %opt=(%default, %$values);
+	my @ignored;
+	for my $key (qw/xalign yalign xscale yscale/)
+	{	# _number returns nothing for a value the constraint arithmetic cannot
+		# use, which is what separates a refused value from one merely spelled
+		# differently: the bundled layouts write '.5', '0.0' and '1.0'
+		my $value=_number($opt{$key});
+		push @ignored,$key if exists $values->{$key} && !defined $value;
+		$opt{$key}= defined $value ? $value : $default{$key};
+	}
+	$self->{unhandled}{$name}=\@ignored if @ignored;
+	# an alignment of .5 is 'center', but a scale of .5 has no enum at all
+	if (grep(_fractional($opt{$_}), qw/xalign yalign/)
+		|| grep($opt{$_}!=0 && $opt{$_}!=1, qw/xscale yscale/))
+	{	$self->_SetConstraints($widget,$container,\%opt);
+		return;
+	}
 	$widget->set_halign($opt{xscale} ? 'fill' : _align($opt{xalign}));
 	$widget->set_valign($opt{yscale} ? 'fill' : _align($opt{yalign}));
+}
+
+# GTK_CONSTRAINT_STRENGTH_REQUIRED. The nickname 'required' warns "isn't
+# numeric" through this binding and silently coerces to 0, which builds a
+# constraint that does not bind at all, so the number is passed directly.
+my $STRENGTH_REQUIRED= 1001001000;
+
+# GtkAlignment's arithmetic, per axis: the child takes its minimum plus the
+# named fraction of the slack, then sits the named fraction of the way across
+# whatever slack is left. Measured against Gtk3::Alignment on the same fixture,
+# a ConstraintLayout reproduces both fractional cases exactly; see D025.
+#
+#	size = scale*slot + (1-scale)*minimum
+#	pos  = align*(1-scale)*slot - align*(1-scale)*minimum
+#
+# The second line is the substituted form of align*(slot-size), which keeps
+# each constraint linear in one source term as GtkConstraint requires. Both
+# constraints are always added: an align of 0 makes the position multiplier 0,
+# but the constraint is still what pins the child to the near edge, and
+# omitting it leaves the layout free to fill the slot instead.
+sub _SetConstraints
+{	my ($self,$widget,$container,$opt)=@_;
+	my $layout=Gtk4::ConstraintLayout->new;
+	$container->set_layout_manager($layout);
+	for my $axis ([qw/xalign xscale width left horizontal/], [qw/yalign yscale height top vertical/])
+	{	my ($align,$scale,$size,$edge,$orientation)=@$axis;
+		my ($a,$s)=($opt->{$align},$opt->{$scale});
+		my ($min)= $widget->measure($orientation,-1);
+		$layout->add_constraint(Gtk4::Constraint->new(
+			$widget,$size,'eq',$container,$size,$s,(1-$s)*$min,$STRENGTH_REQUIRED));
+		$layout->add_constraint(Gtk4::Constraint->new(
+			$widget,$edge,'eq',$container,$size,$a*(1-$s),-$a*(1-$s)*$min,$STRENGTH_REQUIRED));
+	}
 }
 
 sub _align
@@ -371,6 +425,26 @@ sub _align
 	return 'start' if $align<=.25;
 	return 'end' if $align>=.75;
 	return 'center';
+}
+
+# An alignment of 0, .5 or 1 is start/center/end; anything else has no enum
+# value and needs the constraint path. A scale is handled by its caller, since
+# only 0 ('do not expand') and 1 ('fill') have enum equivalents.
+sub _fractional
+{	my $n=shift;
+	return 0 if $n==0 || $n==1 || $n==.5;
+	return 1;
+}
+
+# GTK3 coerces a non-numeric alignment or scale to 0 with a Perl warning. An
+# out-of-range value would make the constraint arithmetic meaningless. Returns
+# nothing for either, so the caller can both fall back to the legacy default
+# and report the value it refused.
+sub _number
+{	my $value=shift;
+	return undef unless defined $value && $value=~m/^[0-9]*\.?[0-9]+$/;
+	return undef if $value<0 || $value>1;
+	return $value+0;
 }
 
 # Resolve a legacy 'icon' or 'stock' option to a name GTK4 can display.

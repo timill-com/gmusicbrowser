@@ -1,8 +1,13 @@
 [gtk4 align]
 Type=G
-VBroot= HBrow
+VBroot= HBrow HBfrac
 HBrow= _ABstart _ABcenter _ABend _ABfill
 ABstart= (xscale=0,xalign=0) Label(text="s")
 ABcenter= (xscale=0,xalign=.5) Label2(text="c")
 ABend= (xscale=0,xalign=1) Label3(text="e")
 ABfill= Label4(text="f")
+HBfrac= _ABfrac _ABscale _ABboth _ABbad
+ABfrac= (xscale=0,xalign=0.3) Label5(text="wwww")
+ABscale= (xscale=0.5,xalign=0) Label6(text="wwww")
+ABboth= (xscale=0.5,xalign=0.7) Label7(text="wwww")
+ABbad= (xscale=0,xalign=frac) Label8(text="wwww")

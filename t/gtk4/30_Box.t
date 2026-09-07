@@ -278,6 +278,72 @@ _drain();
 	isnt($pos{ABstart}{x},$pos{ABend}{x},'start and end alignment differ');
 	isnt($pos{ABcenter}{x},$pos{ABend}{x},'centre and end alignment differ');
 
+	# A fractional xalign or xscale has no halign/valign enum to land on, so
+	# these go through a Gtk4::ConstraintLayout instead (D025 alternative 4).
+	# The legacy arithmetic is size = scale*slot + (1-scale)*minimum and
+	# pos = align*(slot-size), and it was measured to agree with
+	# Gtk3::Alignment on this same fixture shape.
+	my %frac;
+	for my $case (['ABfrac','Label5'],['ABscale','Label6'],['ABboth','Label7'],['ABbad','Label8'])
+	{	my ($box,$child)=@$case;
+		my $b=$arenderer->Widget($box);
+		my $c=$arenderer->Widget($child);
+		my ($ok,$x)=$c->translate_coordinates($b,0,0);
+		my ($min)=$c->measure('horizontal',-1);
+		$frac{$box}={ok=>$ok, x=>$x, slot=>$b->get_width, child=>$c->get_width, min=>$min};
+		ok($ok,"$box child received a real allocation");
+	}
+	# every fractional label carries identical text, so only the option can
+	# move the geometry; a differing string would measure the string
+	for my $box (qw/ABfrac ABscale ABboth/)
+	{	cmp_ok($frac{$box}{slot},'>',$frac{$box}{min}*2,
+			"$box has slack for the fraction to act on");
+	}
+	# xscale=0 keeps the natural size, so the child sits 30% across the slack
+	is($frac{ABfrac}{child},$frac{ABfrac}{min},
+		'a fractional xalign with xscale=0 leaves the child at its natural size');
+	cmp_ok(abs($frac{ABfrac}{x}-0.3*($frac{ABfrac}{slot}-$frac{ABfrac}{min})),'<=',1,
+		'xalign=0.3 places the child 30% across the slack, not bucketed to start');
+	# pristine buckets 0.3 to 'center' (its threshold is <=.25 for start), so
+	# "not at the near edge" would pass there; being off-centre is the fact
+	# that discriminates
+	cmp_ok(abs($frac{ABfrac}{x}+$frac{ABfrac}{child}/2-$frac{ABfrac}{slot}/2),'>',2,
+		'xalign=0.3 is neither bucketed to start nor to center');
+	# xscale=0.5 takes half the slack as extra size, at the near edge
+	cmp_ok(abs($frac{ABscale}{child}
+		-($frac{ABscale}{min}+0.5*($frac{ABscale}{slot}-$frac{ABscale}{min}))),'<=',1,
+		'xscale=0.5 gives the child half the slack, not a full fill');
+	cmp_ok($frac{ABscale}{child},'<',$frac{ABscale}{slot},
+		'a fractional xscale does not fill the whole slot');
+	is($frac{ABscale}{x},0,'xscale=0.5 with xalign=0 starts at the near edge');
+	# both fractional at once
+	cmp_ok(abs($frac{ABboth}{child}
+		-($frac{ABboth}{min}+0.5*($frac{ABboth}{slot}-$frac{ABboth}{min}))),'<=',1,
+		'a fractional xscale still sizes correctly beside a fractional xalign');
+	# a renderer that fills the slot leaves no slack, making the 70% target 0
+	# and any x=0 pass; require the slack first so this turns on the option
+	cmp_ok($frac{ABboth}{slot}-$frac{ABboth}{child},'>',4,
+		'a fractional xscale leaves slack for the alignment to act on');
+	cmp_ok(abs($frac{ABboth}{x}-0.7*($frac{ABboth}{slot}-$frac{ABboth}{child})),'<=',1,
+		'xalign=0.7 places the child 70% across the remaining slack');
+	cmp_ok($frac{ABboth}{x},'>',4,
+		'a fractional xalign beside a fractional xscale is not left at the edge');
+	# control: a non-numeric alignment falls back to the legacy default, which
+	# is the integral xalign=.5 path, so this must pass on both trees
+	cmp_ok(abs($frac{ABbad}{x}+$frac{ABbad}{child}/2-$frac{ABbad}{slot}/2),'<=',1,
+		'a non-numeric xalign falls back to the centred legacy default');
+	# the constraint path is used only where an enum cannot express the value,
+	# so the integral cases keep the plain box layout they had before
+	for my $box (qw/ABfrac ABscale ABboth/)
+	{	isa_ok($arenderer->Widget($box)->get_layout_manager,'Gtk4::ConstraintLayout',
+			"$box uses a constraint layout");
+	}
+	for my $box (qw/ABstart ABcenter ABend ABfill ABbad/)
+	{	my $lm=$arenderer->Widget($box)->get_layout_manager;
+		isnt(ref $lm,'Gtk4::ConstraintLayout',
+			"$box keeps the plain box layout, so the common path does not regress");
+	}
+
 	$arenderer->Destroy;
 	$awindow->destroy;
 	_drain();
