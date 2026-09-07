@@ -52,11 +52,17 @@ the same command outside it passed on the real Wayland connection. The two
 original test files reported 22 TAP results: 16 executed assertions passed and
 six feasibility probes were explicitly skipped. This replaces the temporary
 archive setup recorded on 2026-09-06, whose reported total also included those
-six skips. As of the input-controller probe the suite reports **373 TAP = 368
-executed + 5 skips** (18 binding, 4 proof-of-life, 84 pane, 166 box, 74 icon,
-27 input, 25 menu; 398 TAP after the menu interpreter), counted from
-`prove -v`. A pinned, reproducible package and the four
-remaining M1 probes are still required.
+six skips. As of the list-model probe the suite reports **452 TAP = 448
+executed + 4 skips** (18 binding, 4 proof-of-life, 84 pane, 166 box, 74 icon,
+27 input, 25 menu, 54 list model), counted from `prove -v`. A pinned,
+reproducible package and the three remaining M1 probes are still required.
+
+**Measure the per-file counts through `tools/run-gtk4-smoke`, not a bare
+`prove`.** Without `GMB_GTK4_SMOKE=1` and the isolated XDG environment the
+Wayland-only assertions skip themselves and the figures change: `00_Binding.t`
+reports 19 TAP and 6 skips instead of 18 and 4, and every other file reports
+nothing at all. Copy the runner, add `-v` to its `prove` line, and run the copy
+from `tools/` so its `gmb_root` still resolves.
 
 The run emits `Too late to run INIT block` from the introspection module and
 `Unable to acquire session bus` because the runner unsets the session bus.
@@ -92,10 +98,10 @@ totals for the same command: 173 results before `Next`/`Prev`, 184 after it,
 normalisation, 287 after the `AB` constraint layout, 304 after the label
 `font=`/`color=` CSS, 323 after the inheritance, 337 after the static
 `markup=`, 346 after the size groups, 373 after the input probe, 398 after the
-menu interpreter. Per file: 18
-binding, which is where all five remaining skips live, 4 proof-of-life, 84
-pane, 166 box, 74 icon, 27 input, 25 menu. The
-per-file figures were measured by running each file alone, not by subtraction.
+menu interpreter, 452 after the list-model probe. Per file: 18
+binding, which is where all four remaining skips live, 4 proof-of-life, 84
+pane, 166 box, 74 icon, 27 input, 25 menu, 54 list model. The
+per-file figures were measured through the smoke runner, not by subtraction.
 
 **Two GTK `Failed to set text ... from markup` warnings are expected** in this
 run, one per refused value in `t/layouts/markup.layout`. They are GTK warnings
@@ -384,6 +390,48 @@ because D022 makes stock GNOME a required target.
 With `icon_path` omitted or pointing at a missing directory, rendering still
 succeeds: standard names resolve, bundled names return nothing and the widget
 keeps its text label.
+
+## The list-model probe
+
+`t/gtk4/70_ListModel.t`, 54 assertions on real Wayland, for the M1 gate row and
+D010. It measures the binding, not project code.
+
+**Like `t/gtk4/50_Input.t`, it passes identically on a pristine tree, and that
+is stated rather than glossed.** There is no old implementation for a gate probe
+to fail against; its value is the measurement. Do not read "passes on both
+trees" as a weak test here, and do not try to manufacture discrimination for it.
+
+What it measures, all re-derived on each run and printed as `diag` lines so a
+regression in the numbers is visible:
+
+- a 100,000-row `Gtk4::StringList` builds in ~0.12s, a `Gio::ListStore` of
+  Perl-defined GObjects in ~0.27s, and 1000 random `get_item` reads in ~0.002s;
+- `SingleSelection` and a 50,000-row `MultiSelection` range over 100,000 rows;
+- **factory recycling: 205 row widgets for 100,000 rows**, and scrolling to the
+  last row adds one widget while rebinding 410 times with 204 unbinds;
+- a Perl sort of 100,000 custom objects plus a full model reload, ~1.1s.
+
+**Three traps this file exists to stop the next session re-discovering:**
+
+- **`scroll_to` is what moves a `ListView`.** Setting the enclosing
+  `ScrolledWindow`'s vadjustment changes its value and nothing else — the view
+  never repositions or rebinds — so a recycling measurement taken that way reads
+  "no recycling" and looks like a binding limitation. There is an assertion
+  pinning that non-behaviour precisely because it is so convincing.
+- **Construction is not evidence of usability.** `StringSorter`,
+  `NumericSorter` and `StringFilter` all construct and are all unusable: they
+  select their value through a `GtkExpression`, which is unmarshallable. An
+  expression-less `StringSorter` silently leaves the order untouched.
+- **A failed `Gio::ListStore::splice` cannot be cleaned up.** With custom
+  GObjects it passes nulls, GIO calls the store undefined, and *freeing* it
+  segfaults — several assertions later, in a process holding other GTK objects,
+  so the crash points nowhere near the cause. It took a truncation bisect of the
+  test file to find. That assertion therefore runs in a **child process**; do
+  not move it back inline.
+
+Two bare constructors were also removed after they logged
+`gtk_custom_filter_set_filter_func: assertion 'match_func || ...' failed`:
+`CustomFilter` and `CustomSorter` take their callback at construction.
 
 ## The menu interpreter
 

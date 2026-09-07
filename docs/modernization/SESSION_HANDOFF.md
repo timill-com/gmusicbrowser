@@ -1,12 +1,95 @@
 # Session handoff
 
-Status: the tree is clean. The most recent session did **three** increments
-after re-verifying the whole baseline: a parser correctness fix (**D035**), the
-**M1 input-controller probe**, which closed a gate row that had been blocking
-every other group of work, and the **menu interpreter** (**D038**). It also
-recorded the user's standing direction as D036 and D037.
+Status: the tree is clean. The most recent session did **one** increment after
+re-verifying the whole baseline: the **M1 100k-row list-model probe**
+(`t/gtk4/70_ListModel.t`), which closed the second gate row and answered the
+performance half of **D010**. It also recorded **D039**, the user's answer on
+how to modernize `RunPerlCode`.
 
-## Most recent session: the `FB` packing prefix (D035)
+## Most recent session: the 100k-row list-model probe
+
+`t/gtk4/70_ListModel.t`, 54 assertions on real Wayland. Chosen with the user
+over the menu increment, after measuring that a naive `MenuItem` port would
+deliver **14 working items out of 99** — see the command-registration section
+below, which is now in `PROGRESS.md`.
+
+**The headline: the list/model stack carries a library-sized model comfortably.**
+100,000 rows build in 0.12s (`StringList`) or 0.27s (`Gio::ListStore` of
+Perl-defined GObjects); random access, `SingleSelection` and a 50,000-row
+`MultiSelection` range are all effectively free; and the
+`SignalListItemFactory` allocates **205 row widgets for 100,000 rows**,
+recycling them on scroll (setup 205 -> 206, bind 205 -> 410, 204 unbinds). So
+D010's option 1 is no longer speculative, and nothing argues for option 2 on
+performance grounds any more.
+
+**Four binding limits, each now asserted and in D006:**
+
+- **`GtkExpression` is unmarshallable**, like `GdkEvent` and the graphene
+  types. `StringSorter`, `NumericSorter` and `StringFilter` therefore
+  **construct but cannot be configured** — a case where construction is not
+  evidence of usability, which is worth generalising.
+- **`CustomSorter` receives `undef` for both items**, so the documented escape
+  hatch is unusable and **sorting has to happen in Perl** over the backing
+  list — 1.1s at 100,000 rows, and the same shape legacy already uses.
+  `CustomFilter` *does* receive its item, so filtering in Perl works.
+- **`Gio::ListStore::splice` corrupts the store with custom GObjects**: it
+  passes nulls, GIO logs "undefined state", and **nothing raises a Perl error**.
+  Append in a loop instead (0.14s for 100,000).
+- **A Perl-defined `Glib::Object` subclass works fine as a row type.** Do not
+  over-generalise D006's vfunc entry into "no subclassing"; it is specifically
+  widget layout vfuncs that are ignored.
+
+### Traps that cost real time this session
+
+- **`scroll_to` is what moves a `ListView`; the `ScrolledWindow` adjustment is
+  not.** `set_value` moves the value and nothing else, so my first recycling
+  measurement read "no recycling at all" and looked like a binding limitation.
+  The suite now pins that non-behaviour with its own assertion.
+- **A failed `splice` cannot be cleaned up, and the crash lands nowhere near
+  the cause.** The corrupted store segfaults when *freed*, several assertions
+  later, only in a process holding other GTK objects. `prove` reported
+  "All 47 subtests passed" *and* a SEGV with no plan. Found by truncating the
+  test file at successive line numbers and re-running — a bisect on the test
+  itself, which is the transferable technique. That assertion now runs in a
+  child process.
+- **I re-derived a known D006 rule the hard way.** Several scratch probes
+  segfaulted at exit; I chased it through ListView, ColumnView and even
+  `Gtk4::Label` before realising the scripts called `try_init` without
+  `backend_probe`, which D006 already records as a segfault. **Read the
+  evidence list before debugging a crash in a scratch script**, not just before
+  writing production code.
+- **A bare `prove` misreports the whole GTK4 suite.** Without `GMB_GTK4_SMOKE=1`
+  and the isolated XDG environment, `00_Binding.t` reports 19 TAP / 6 skips
+  instead of 18 / 4 and every other file reports 0. Copy `tools/run-gtk4-smoke`,
+  add `-v`, and run the copy **from `tools/`** so its `gmb_root` resolves.
+
+### The menu numbers, re-derived and confirmed
+
+The previous handoff's warning holds exactly. From the parser catalog:
+`MenuItem` is **99** = 69 command-only + 28 `togglewidget` + 2 neither;
+**20 distinct `command=` values** across all bundled widgets, of which only
+**six** are registered; **only 14 of the 69** use a registered one. `RunPerlCode`
+is 23 instances. `PROGRESS.md` now carries this and the command to re-derive it.
+
+### D039 — how to modernize `RunPerlCode`
+
+The user answered the design question with a direction rather than a menu
+choice: "How can we mordernize? I am not familiar with perl at all.. But
+basically we should modernize as much as we can."
+
+What makes an answer possible is a measurement: across every bundled layout and
+plugin there are **exactly five distinct `RunPerlCode` expressions**, and all
+five are plain calls to named core subs with constant arguments. So the `eval`
+is a generic mechanism carrying five knowable actions. D039 proposes registering
+those five as named commands, passing `ChooseAddPath`'s arguments as command
+parameters, keeping `RunPerlCode` working unchanged in GTK3 (D002), and
+reporting an unrecognised expression through `Unhandled` in GTK4 rather than
+evaluating it. **Status Proposed, not Accepted** — it widens `%Command`, which
+is shared code and needs a GTK3 pass, and it should be done as one increment
+covering the whole 14-command registration gap.
+
+## Earlier session: the `FB` packing prefix (D035)
+
 
 **How it was found is the transferable part.** The task was to scope the
 song-field state path with the user. Sizing the smaller alternatives first —
@@ -1834,6 +1917,25 @@ which needs its own scoped decision. `Default = Window(size=1000x750)` also
 means the reported ~1190px window is not the layout's designed size.
 
 ## Suggested next steps
+
+**Updated after the list-model probe.** The strongest candidates now are, in
+rough order of value:
+
+- **The command-registration increment** (D039 plus the other 13 unregistered
+  commands). It is the actual gate on menus, it is shared code needing a GTK3
+  pass, and doing it once is far better than five commands at a time. After it,
+  `MB`/`SM`/`BM` plus `MenuItem` turns D038's interpreter into visible menus for
+  most of the 99 instances instead of 14.
+- **The song-field state path**, still blocked on the frozen
+  `FRONTEND_CONTRACT.md` and a fixture song source — see 0b below, which is
+  unchanged and still the largest converging gate.
+- **The custom-drawing probe**, now the largest remaining M1 unknown and the
+  other half of D010. The list-model probe narrowed it: row *data* subclassing
+  works, so the question is specifically widget drawing and layout.
+- **The show/hide subsystem**, which unlocks `ToggleButton` (35) and the 28
+  `togglewidget` `MenuItem`s, and needs no frozen-contract change.
+
+`TB` remains a small, low-risk container increment if a short one is wanted.
 
 0. ~~Layout-level option inheritance.~~ **Done** as D032. `DefaultFont` and
    `DefaultFontColor` are inherited; `PATH`, `SkinPath`, and `SkinFile` are

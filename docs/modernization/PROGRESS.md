@@ -94,14 +94,14 @@ and the order below is set by what blocks what, not by size.
 
 | group | instances | blocked on |
 |---|---:|---|
-| menus (`MenuItem` 99, `SeparatorMenuItem` 30, the `*Item` families) | 206 | interpreter **built** (D038); needs `MB`/`SM`/`BM` to place one in a layout |
-| list/model (`FilterPane` 63, `SimpleSearch` 30, `SongList` 22, `SongTree` 19, `QueueList` 17, …) | 173 | the 100k-row `GListModel` probe, and D010 |
+| menus (`MenuItem` 99, `SeparatorMenuItem` 30, the `*Item` families) | 206 | interpreter **built** (D038); needs `MB`/`SM`/`BM` to place one in a layout, and command registration (D039) |
+| list/model (`FilterPane` 63, `SimpleSearch` 30, `SongList` 22, `SongTree` 19, `QueueList` 17, …) | 173 | model probe **closed**; now D010's remaining half (custom drawing) and the song-field state path |
 | song-field labels (`Title` 27, `Album` 26, `Artist` 25, `Total` 26, `Time` 13, …) | 157 | a `FRONTEND_CONTRACT.md` extension, and a fixture song source |
 | everything else (`ToggleButton` 35, `Cover` 26, `Sort` 21, `TimeBar` 20, …) | 390 | mostly pointer input and the show/hide subsystem |
 
 **The sequencing lesson so far: M1's exit gate is unmet while M4/M5 widget work
-has been proceeding.** That is why input came first. Four probes are still
-BLOCKED, and each gates a group above:
+has been proceeding.** That is why input came first, and the list model second.
+Three probes are still BLOCKED, and each gates a group above:
 
 1. ~~input controllers~~ — **closed**, `t/gtk4/50_Input.t`. It was the correct
    first move because it is the only probe every other group depends on: menus
@@ -110,14 +110,39 @@ BLOCKED, and each gates a group above:
    ratchet* — `PARITY_CHECKLIST.md` says no row reaches `Parity review` without
    pointer and keyboard evidence, so before this **no widget could ever be
    marked done**, however many rendered.
-2. **100k-row `GListModel`/`ListView`** — gates the entire 173-instance list
-   group and is the largest single unknown left. D010 (SongTree architecture)
-   cannot be resolved without it.
-3. **custom drawing** — gates the SongTree skin layer. Partly answered already:
-   D006 records that layout vfunc overrides are silently ignored, so the answer
-   is likely "compose, do not subclass", as `AB` did under D030.
+2. ~~**100k-row `GListModel`/`ListView`**~~ — **closed**,
+   `t/gtk4/70_ListModel.t`. The stack carries a library-sized model: 100,000
+   rows build in 0.12–0.27s and the factory allocates **205 row widgets for
+   100,000 rows**, recycling them on scroll. D010's option 1 is no longer
+   speculative. Three binding limits shape any port: `GtkExpression` is
+   unmarshallable so the GTK sorters cannot be configured, `CustomSorter`
+   receives `undef` items so **sorting happens in Perl** (1.1s at 100k, matching
+   how legacy already sorts), and `Gio::ListStore::splice` corrupts the store
+   with custom objects so rows must be appended. `CustomFilter` does work.
+   **This does not unblock the 173-instance list group on its own** — those
+   widgets also need the song-field state path and the per-widget subsystems;
+   what it removes is the architectural unknown.
+3. **custom drawing** — gates the SongTree skin layer, and is now the largest
+   unknown left. Partly answered: D006 records that layout vfunc overrides are
+   silently ignored, so the answer is likely "compose, do not subclass", as `AB`
+   did under D030. The list-model probe narrowed it further — a Perl-defined
+   `Glib::Object` subclass works fine for **row data**, so it is specifically
+   widget drawing and layout that remain in question.
 4. **drag and drop**, **async finish/error**, **GStreamer loop coexistence** —
    independent of the layout surface; needed for the gate, not for widgets.
+
+**The gate on menus is command registration, not the `MenuItem` widget.**
+Measured 2026-09-07 by walking the parser catalog for `command=` values. There
+are **20 distinct commands** across all bundled widgets and only **six** are
+registered in `@Commands` (`gmusicbrowser_frontend_legacy.pm:18`): `PlayPause`,
+`Stop`, `NextSong`, `PrevSong`, `IncVolume`, `DecVolume`. Of the 99 `MenuItem`
+instances, 69 carry a command and **only 14 of those use a registered one**, so
+a naive "port `MenuItem`" delivers 14 working items out of 99. The rest split
+into `RunPerlCode` (23, see **D039**), `OpenPref` (9), `Quit` (8, deliberately
+outside `%Command` as a lifecycle action), `OpenCustom` (6), `OpenSongProp` (4),
+and five more at 1–2 each. Widening `@Commands` is shared code and needs a GTK3
+pass. The other 30 `MenuItem` instances are 28 `togglewidget` (needing the
+show/hide subsystem) and 2 with neither option.
 
 Still needing a **decision from the user**, not just code:
 
@@ -181,12 +206,15 @@ The next unimplemented elements by instance count, for scale:
 | suite | result | notes |
 |---|---|---|
 | `make test-modernization` | 548 assertions, 0 skips | offline, in-process doubles |
-| `make test-gtk4` | 398 TAP = 393 executed + 5 skips | real Wayland; 4 M1 probes still BLOCKED |
+| `make test-gtk4` | 452 TAP = 448 executed + 4 skips | real Wayland; 3 M1 probes still BLOCKED |
 | `make test-gtk3` | 1 assertion | startup/shutdown on real Wayland |
 
-Per file for `make test-gtk4`: 18 binding (holding all 5 skips), 4
-proof-of-life, 84 pane, 166 box, 74 icon, 27 input, 25 menu. Count skips from `prove -v`, never
-by subtraction. Two GTK `Failed to set text ... from markup` warnings are
+Per file for `make test-gtk4`: 18 binding (holding all 4 skips), 4
+proof-of-life, 84 pane, 166 box, 74 icon, 27 input, 25 menu, 54 list model.
+Count skips from `prove -v`, never by subtraction, and run the files through
+`tools/run-gtk4-smoke`: a bare `prove` without `GMB_GTK4_SMOKE=1` reports
+different counts (19 TAP and 6 skips for `00_Binding.t`) because the
+Wayland-only assertions skip themselves. Two GTK `Failed to set text ... from markup` warnings are
 expected, one per refused value in `t/layouts/markup.layout`.
 
 **`t/01_ModFileMetadata.t` needs care when reporting.** Earlier documents
@@ -225,6 +253,19 @@ the table; each has been wrong at least once when taken on trust.
 	        next if $ch->{kind} eq "container_ref";
 	        print "$ch->{element}\n"; } } }' | sort | uniq -c | sort -rn
 
+	# command registration: the 20 distinct command= values, and which are
+	# registered in @Commands (gmusicbrowser_frontend_legacy.pm:18)
+	perl -I. -e 'require "gmusicbrowser_layout_parser.pm";
+	  my $c=Layout::Parser::ParseFiles(files=>[glob "layouts/*.layout"]); my %cmd;
+	  for my $id (@{$c->{order}}) { my $l=$c->{layouts}{$id};
+	    my %own=map {$_->{name}=>1} @{$l->{declarations}};
+	    for my $n (@{$l->{nodes}}) { next unless $own{$n->{name}};
+	      for my $ch (@{$n->{children}}) {
+	        next if $ch->{kind} eq "container_ref";
+	        my $v=$ch->{options}{values}||{};
+	        $cmd{$v->{command}}++ if defined $v->{command}; } } }
+	  printf "%-28s %3d\n",$_,$cmd{$_} for sort {$cmd{$b}<=>$cmd{$a}} keys %cmd;'
+
 	# test position
 	make test-modernization                                 # offline
 	make test-gtk4      # real Wayland, outside the sandbox
@@ -262,26 +303,29 @@ figures; see D034. The reliable method is to walk the parser's catalog.
 
 ## Decisions
 
-D001–D038 exist; **30 are Accepted** and **8 are unresolved**. All eight are
+D001–D039 exist; **30 are Accepted** and **9 are unresolved**. Eight are
 pre-existing and none blocks a layout increment, but four of them are gates on
 the milestones, so do not read the layout work's cleared backlog as the whole
-picture:
+picture. The ninth, **D039**, is new and is the one to settle before menus:
 
 | | status | what it holds up |
 |---|---|---|
 | D006 | Open | which GTK4 Perl binding to support — the **M1 gate**. Its evidence section is the accumulated binding-behaviour record every increment reads. |
 | D007 | Open | canonical application ID |
 | D008 | Open | minimum supported platform versions |
-| D010 | Open | SongTree GTK4 rendering architecture — gates the largest widget |
+| D010 | Open | SongTree GTK4 rendering architecture — gates the largest widget. **Option 1's performance half is now measured and passes**; what remains is the custom-drawing probe. |
 | D009 | Proposed | transitional use of deprecated GTK4 TreeView APIs |
 | D011 | Proposed | initial packaging format |
 | D012 | Proposed | legacy playback backends |
 | D019 | Proposed | remote cache policy |
+| D039 | Proposed | how `RunPerlCode` is modernized — gates 23 of the 99 `MenuItem` instances |
 
 D006 and D010 are the two that matter for the port's shape: D006 because the
 binding's limits have already made one design impossible (layout vfunc
 overrides are silently ignored, which is why `AB` uses a constraint layout),
-and D010 because `SongList`/`SongTree` is the biggest remaining widget.
+and D010 because `SongList`/`SongTree` is the biggest remaining widget — though
+its performance question is now answered, so what is left of it is the drawing
+layer rather than the architecture.
 
 ## Not started at all
 
@@ -290,5 +334,5 @@ container `FB` (whose prefix now parses, but whose `SFixed` dynamic placement
 needs a layout manager — D035), embedded layouts (`@layout`), every list/model widget, SongTree,
 drag and drop, the drawing layer used by the SongTree skins, `hover_layout`,
 right-to-left packing, configuration persistence for the GTK4 proof
-application, and the remaining M1 gate probes (100k-row model, custom drawing,
-input controllers, GStreamer loop coexistence, reproducible packaging).
+application, and the remaining M1 gate probes (custom drawing, drag and drop,
+async finish/error, GStreamer loop coexistence, reproducible packaging).

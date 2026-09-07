@@ -296,6 +296,50 @@ Evidence recorded so far, against the system
   `add_controller`, `observe_controllers` and `remove_controller` all work, the
   last mattering for a renderer `Destroy`. This closes the M1 gate row; see
   `t/gtk4/50_Input.t`.
+- **The list/model stack carries a 100,000-row library, and the factory
+  recycles.** `Gtk4::StringList`, `Gio::ListStore`, `SingleSelection`,
+  `MultiSelection`, `NoSelection`, `SignalListItemFactory`, `ListView`,
+  `ColumnView`, `SortListModel` and `FilterListModel` all construct. A
+  100,000-row `StringList` builds in 0.12s and a `Gio::ListStore` of
+  Perl-defined GObjects in 0.27s; 1000 random `get_item` reads take 0.0017s and
+  a 50,000-row `MultiSelection` range is instant. A `SignalListItemFactory`
+  builds **205 row widgets for 100,000 rows** and reuses them: scrolling to the
+  last row adds one widget while rebinding 410 times with 204 unbinds. This
+  closes the M1 gate row; see `t/gtk4/70_ListModel.t`.
+- **A Perl-defined `Glib::Object` subclass works as a list item**, registers,
+  round-trips its properties, and comes back from `get_item` blessed into its
+  own package. `Gio::ListStore->new` takes the item GType as a package name.
+  Subclassing an *object* is therefore fine; it is specifically widget **layout
+  vfunc overrides** that are silently ignored, so do not generalise that entry
+  into "no subclassing".
+- **`GtkExpression` is not marshallable, like `GdkEvent` and the graphene
+  types.** `PropertyExpression->new` dies with `interface_to_sv: Don't know how
+  to handle fundamental type GtkExpression (196)`, and a sorter will not hand
+  one back either. `StringSorter`, `NumericSorter` and `StringFilter` all
+  select their value through an expression, so **they construct but cannot be
+  configured** — construction is not evidence that they are usable. An
+  expression-less `StringSorter` is not a fallback: it leaves the order
+  untouched, which looks like a sort that silently did nothing.
+- **`CustomSorter` receives `undef` for both items it compares**, so the
+  documented escape hatch from expressions is unusable: no Perl comparison is
+  possible. `CustomFilter` **does** receive its item, so filtering in Perl
+  works. The consequence is that ordering must happen in Perl over the backing
+  list, which is also how legacy already sorts. Sorting 100,000 custom objects
+  and reloading the store costs 1.1s (0.9s sort, 0.2s reload).
+- **`Gio::ListStore::splice` does not marshal an array of custom GObjects.** It
+  passes nulls; GIO logs `item 0 is a GInterface instead of ...  GListStore is
+  now in an undefined state` and leaves the store empty. **Nothing raises a
+  Perl error**, so a port would see only an empty model. The store is then
+  unrecoverable — freeing it segfaults in any process holding other GTK
+  objects, a long way from the call that caused it — so the defect is proven in
+  a child process. Append in a loop instead: 100,000 objects take 0.14s.
+  `Gtk4::StringList::splice` is unaffected, which is why one working `splice`
+  is not evidence for the other.
+- **`scroll_to` is what moves a `ListView`; the enclosing `ScrolledWindow`'s
+  adjustment does not.** `set_value` on the vadjustment changes the value and
+  nothing else — the view neither repositions nor rebinds a single row, so a
+  recycling measurement taken that way reads "no recycling" and looks like a
+  binding limitation. `$view->scroll_to($row,'none',undef)` works.
 - **`GdkEvent` is not marshallable, like the graphene types.**
   `GestureClick->get_current_event` dies with `interface_to_sv: Don't know how
   to handle fundamental type GdkEvent (200)`. **Inside a signal handler Glib
@@ -383,7 +427,7 @@ has an approved, time-bounded exception.
 
 ## D010 — SongTree GTK4 rendering architecture
 
-Status: **Open**
+Status: **Open**, but option 1 is now measured and no longer speculative
 
 Gate: M1 prototype, final choice early in M5
 
@@ -395,6 +439,32 @@ Options:
 
 Choose based on compatibility, measured performance, memory, accessibility,
 input behaviour, and maintainability.
+
+Evidence recorded 2026-09-07, `t/gtk4/70_ListModel.t`:
+
+**Option 1's performance question is answered and it passes.** The M1 probe
+built a 100,000-row model and a `ListView` over it: the model costs 0.12s
+(strings) or 0.27s (custom objects), and the factory allocates **205 row
+widgets for 100,000 rows**, reusing them on scroll. Memory and construction
+cost therefore scale with the viewport, not the library. Nothing here argues
+for option 2 on performance grounds, which was the main reason it existed.
+
+**What is not yet answered, and what shifted:** the probe measured the model
+and the factory, not the SongTree's grouped/skinned row rendering. That is the
+custom-drawing gate row, still BLOCKED. Two binding limits also narrow how
+option 1 would be built:
+
+- **Sorting cannot use the GTK sorters.** `GtkExpression` is unmarshallable and
+  `CustomSorter` receives `undef` items, so ordering happens in Perl over the
+  backing list and the model is reloaded — 1.1s at 100,000 rows. That matches
+  how legacy already sorts, so it is not a new constraint on behaviour, but it
+  does mean `SortListModel` is not part of the design. Filtering, by contrast,
+  can use `CustomFilter`.
+- **Row objects must be appended, never spliced.** `Gio::ListStore::splice`
+  corrupts the store with custom GObjects.
+
+A Perl-defined `Glib::Object` subclass carrying song fields works, so the row
+type option 3 would need is available.
 
 ## D011 — Initial packaging format
 
@@ -2360,6 +2430,87 @@ Still true, and excluded from any coverage claim: the **23**
 and no layout `MenuItem` instance is rendered yet — this entry ports the
 mechanism, not the `MB`/`SM`/`BM` containers that would place a menu in a
 layout.
+
+## D039 — Modernizing `RunPerlCode`: register the named callbacks, keep `eval` as the fallback
+
+Status: **Proposed**
+
+Gate: before any `MenuItem` instance is rendered
+
+Context:
+
+The user asked, of `RunPerlCode`: "How can we modernize? I am not familiar with
+perl at all.. But basically we should modernize as much as we can." This entry
+answers that question rather than choosing between the two options previously
+offered, because measuring the actual usage changed what the choice is.
+
+`RunPerlCode` is the core command `[sub {eval $_[1]}, ...]`
+(`gmusicbrowser.pl:1671`) — a layout string evaluated as Perl at activation. It
+is **23 of the 99 bundled `MenuItem` instances**, the single largest
+unregistered command, so menus cannot be finished without settling it.
+
+The measurement that matters: across every bundled layout and plugin there are
+**exactly five distinct expressions**, and all five are plain calls to named
+core subs with constant arguments.
+
+	RunPerlCode(::IdleScan)            7 instances
+	RunPerlCode(::ChooseAddPath(0,1))  7
+	RunPerlCode(::IdleCheck)           4
+	RunPerlCode(::AboutDialog)         3
+	RunPerlCode(::ChooseAddPath(1,1))  2
+
+**Not one of them needs arbitrary evaluation.** The `eval` is a generic
+mechanism carrying five specific, knowable actions. That is what makes a
+modernization possible without a behaviour change.
+
+Decision:
+
+1. **Register the five as named commands** in the core `%Command` table and in
+   the frontend's `@Commands`, so the GTK4 renderer activates a named command
+   through the frontend boundary and never evaluates layout text. This is the
+   modernization: the boundary carries a fixed vocabulary, and a layout string
+   stops being executable code.
+2. **`ChooseAddPath` takes its two constant arguments as command parameters**,
+   not as an embedded call, so no argument string is parsed either.
+3. **Keep `RunPerlCode` itself working in GTK3, unchanged.** It is a documented
+   layout option and D002 makes it a compatibility API; a third-party layout may
+   use an expression not in the list above.
+4. **In GTK4, an unrecognised `RunPerlCode` expression is reported through
+   `Unhandled`**, not evaluated and not silently dropped. A layout using one
+   still loads, and the renderer says what it refused.
+
+Alternatives:
+
+1. **Evaluate arbitrary Perl behind the frontend boundary.** Maximum
+   compatibility, and the boundary would have to hand layout text to the core
+   for evaluation — which makes the frontend contract a code-execution channel
+   and undoes the isolation the GTK4 split exists to create. Rejected as the
+   default, though clause 4 leaves the door open if a real layout needs it.
+2. **Registry only, with no fallback and no report.** Rejected: a layout using
+   a sixth expression would fail silently, which the "never silently accept"
+   rule forbids.
+3. **Drop `RunPerlCode` in GTK4 entirely.** Rejected: it breaks 23 bundled menu
+   instances outright, and clause 2 of D036 says layout compatibility wins.
+
+Consequences:
+
+Widening `%Command` and `@Commands` is **shared code**, so this needs a GTK3
+pass under `AGENTS.md`, exactly as the note in `PROGRESS.md` says for the other
+14 unregistered commands. It should be done as one increment covering the whole
+command-registration gap rather than five commands at a time.
+
+This is the same shape of answer the other unregistered commands need —
+`OpenPref` (9), `OpenSongProp` (4), `OpenCustom(...)` (6) and the selection
+commands are all named actions that simply are not registered yet. `Quit` (8)
+stays deliberately outside `%Command` as a lifecycle action.
+
+Evidence or removal condition:
+
+Expression census re-derived 2026-09-07 by walking the parser catalog for
+`command=` values and by `grep -rhno 'RunPerlCode([^)]*)' layouts/ plugins/`;
+both give the same five. Revisit if a bundled or widely used third-party layout
+is found using an expression that is not a call to a named core sub, which would
+make clause 4's report the common path rather than the exception.
 
 ## Decision template
 

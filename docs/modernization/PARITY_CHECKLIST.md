@@ -25,7 +25,7 @@ Statuses used here are **Not started**, **Boundary work**, **GTK4 in progress**,
 | Neutral layout parser reads the proof layout | GTK4 in progress | Offline parser test passed |
 | GTK4 renderer builds `VB`, `HB`, `Label`, `Play`, and `Quit` | GTK4 in progress | Local widget and interaction proof passed |
 | Command and state boundary drives the proof widgets | GTK4 in progress | Contract and GUI proof passed |
-| 100,000-row modern list/model probe | Boundary work | Timing and memory record |
+| 100,000-row modern list/model probe | GTK4 in progress | `t/gtk4/70_ListModel.t` passed on real Wayland; 205 row widgets for 100,000 rows, model built in 0.12-0.27s |
 | Custom drawing/widget probe | Boundary work | Render and lifecycle test |
 | Click, motion, scroll, keyboard, and menu controllers | GTK4 in progress | `t/gtk4/50_Input.t` passed on real Wayland; DnD still separate |
 | GStreamer bus and GTK4 GLib-loop coexistence | Boundary work | Deterministic bus test |
