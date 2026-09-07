@@ -26,7 +26,7 @@ MARKDOWN= markdown
 
 all: locale doc
 test-modernization:
-	prove --norc -I. t/02_LayoutParser.t t/03_FrontendContract.t t/04_Gtk4LayoutRenderer.t t/05_FrontendLegacy.t t/06_LifecycleLegacy.t
+	prove --norc -I. t/02_LayoutParser.t t/03_FrontendContract.t t/04_Gtk4LayoutRenderer.t t/05_FrontendLegacy.t t/06_LifecycleLegacy.t t/07_Gtk4Menu.t
 
 test-gtk4:
 	sh tools/run-gtk4-smoke
