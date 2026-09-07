@@ -56,10 +56,11 @@ What the previous handoff got right is the other half of its recommendation:
 The GTK4 work is an early spike, not a partly-finished migration. Do not assume
 otherwise from the size of the planning documents.
 
-- `gtk4-alpha` is 18 commits past `master`; the list is in the next section.
-  Earlier handoffs said "ten" at `0074c06`, where the real count was 11 and the
-  listed commits already numbered 11. Read the count from
-  `git rev-list --count master..HEAD`, not from the prose.
+- `gtk4-alpha` is a couple of dozen commits past `master`; the list is in the
+  next section. **Do not record the exact number here.** Earlier handoffs said
+  "ten" at `0074c06` where the real count was 11, and any figure written down
+  goes stale the moment the next documentation commit lands — including the
+  commit that records it. Read it from `git rev-list --count master..HEAD`.
 - All 1,444 `Gtk3::` references are still present and unmodified across 27
   files. None has been ported. Verified against a `git archive` of `master`,
   which reports the same 1,444 and 27.
@@ -77,8 +78,9 @@ otherwise from the size of the planning documents.
 
 ## What is committed and what is not
 
-Everything is committed. `gtk4-alpha` is **18** commits past `master`,
-confirmed with `git rev-list --count master..HEAD`:
+Everything is committed. For the number of commits past `master`, run
+`git rev-list --count master..HEAD` rather than trusting a figure here.
+Newest first:
 
 	80fcf7c docs: correct the commit count and reconcile the Gtk3 reference count
 	9df79dc docs: record the landed commits in the handoff
