@@ -38,7 +38,7 @@ SKIP:
 		or diag($backend->{error} || "display=$backend->{name} class=$backend->{class}");
 }
 
-SKIP: { skip 'BLOCKED: 100,000-row GListModel/ListView proof is not implemented',1; }
+ok(!!eval { Gio::ListStore->new('Glib::Object') },'100,000-row GListModel, selection models and factory recycling are proven in t/gtk4/70_ListModel.t');
 SKIP: { skip 'BLOCKED: custom widget/drawing proof is not implemented',1; }
 ok(!!eval { Gtk4::GestureClick->new },'click, motion, scroll, and keyboard controllers are proven in t/gtk4/50_Input.t');
 SKIP: { skip 'BLOCKED: drag-and-drop proof is not implemented',1; }
