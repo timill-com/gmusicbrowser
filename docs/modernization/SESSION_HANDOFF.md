@@ -56,9 +56,20 @@ What the previous handoff got right is the other half of its recommendation:
 The GTK4 work is an early spike, not a partly-finished migration. Do not assume
 otherwise from the size of the planning documents.
 
-- `gtk4-alpha` is ten commits past `master`; the list is in the next section.
+- `gtk4-alpha` is 17 commits past `master`; the list is in the next section.
+  Earlier handoffs said "ten" at `0074c06`, where the real count was 11 and the
+  listed commits already numbered 11. Read the count from
+  `git rev-list --count master..HEAD`, not from the prose.
 - All 1,444 `Gtk3::` references are still present and unmodified across 27
-  files. None has been ported.
+  files. None has been ported. Verified against a `git archive` of `master`,
+  which reports the same 1,444 and 27.
+  A naive repository-wide grep now reports **1,447 across 28 files**, and that
+  is not porting drift: `gmusicbrowser_gtk4_layout.pm` carries three `Gtk3::`
+  mentions **in comments**, naming the GTK3 source of truth for a translation
+  (`Gtk3::HBox->new`, `Gtk3::IconSize::lookup`, `Gtk3::Label::set_alignment`).
+  That is the file's established convention. No GTK4 code loads Gtk3, and
+  `t/04_Gtk4LayoutRenderer.t` asserts `!exists $INC{'Gtk3.pm'}`. Exclude
+  `gmusicbrowser_gtk4*` when counting.
 - GTK3 is the complete, working application (about 33,000 lines in the main
   modules). It is not a beta layer. The port direction is GTK3 to GTK4.
 - The current branch is `gtk4-alpha`. A separate `gtk4` branch exists but points
@@ -66,9 +77,10 @@ otherwise from the size of the planning documents.
 
 ## What is committed and what is not
 
-Everything is committed. `HEAD` is `cf933af` and `gtk4-alpha` is fifteen
-commits past `master`:
+Everything is committed. `gtk4-alpha` is **17** commits past `master`,
+confirmed with `git rev-list --count master..HEAD`:
 
+	9df79dc docs: record the landed commits in the handoff
 	cf933af docs: record D028, and correct the markup usage count
 	58d7cb3 gtk4: apply the legacy label alignment and ellipsize options
 	20f676f docs: record the landed commits in the handoff
