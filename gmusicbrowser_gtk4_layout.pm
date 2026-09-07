@@ -300,18 +300,21 @@ sub _IconName
 {	my ($self,$name)=@_;
 	return unless defined $name && $name ne '';
 	my $theme=$self->_IconTheme or return;
-	my @chain=($name,$IconFallbacks{$name},$StockNames{$name},
-		$StockNames{$IconFallbacks{$name} || ''});
-	for my $candidate (@chain)
-	{	next unless defined $candidate && $candidate ne '';
-		return $candidate if $theme->has_icon($candidate);
+	my @chain=grep defined && $_ ne '',
+		$name,$IconFallbacks{$name},$StockNames{$name},
+		$StockNames{$IconFallbacks{$name} || ''};
+	# Full-colour names are tried first so a theme that still carries them keeps
+	# supplying them. Adwaita, which stock GNOME uses, ships only the '-symbolic'
+	# variant of many action names: 'application-exit' and 'view-refresh' are
+	# absent there but resolve as '-symbolic' in every theme measured, so the
+	# suffixed pass is what makes these names follow the host theme on GNOME.
+	for my $candidate (@chain,map $_.'-symbolic', grep !m/-symbolic$/, @chain)
+	{	return $candidate if $theme->has_icon($candidate);
 	}
 	# A mapped name that this icon theme happens not to carry is still a better
 	# answer than nothing, but an unmapped unknown name is not: that would show
 	# a broken image where the layout expected a usable button.
-	for my $candidate (@chain[1..$#chain])
-	{	return $candidate if defined $candidate && $candidate ne '';
-	}
+	return $chain[1] if @chain>1;
 	return;
 }
 

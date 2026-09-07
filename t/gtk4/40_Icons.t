@@ -53,7 +53,10 @@ $renderer->Render('gtk4 icons');
 # mapped before it can resolve at all
 is($renderer->Widget('Play')->get_icon_name,'media-playback-start',
 	'a legacy gtk-* icon name maps to its freedesktop replacement');
-is($renderer->Widget('Quit')->get_icon_name,'application-exit',
+# The runner isolates the session bus, so the icon theme here is GTK's own
+# default rather than the desktop's choice. Adwaita ships 'application-exit'
+# only as a symbolic icon, so pin the mapping and let either variant satisfy it.
+like($renderer->Widget('Quit')->get_icon_name,qr/^application-exit(?:-symbolic)?$/,
 	'the stock= option resolves through the same mapping');
 
 # a bundled gmb-* icon resolves from the flat pix/ directory
@@ -85,8 +88,7 @@ is($textplay->get_label,'Play','a text Play button returns to its play label');
 
 # Every resolved name must be loadable. lookup_icon always returns a paintable
 # because GTK substitutes its own missing-image icon, so a correct freedesktop
-# name that this host's theme happens to lack still renders: verified with
-# 'application-exit', which Yaru does not carry.
+# name that the active theme happens to lack still renders.
 my $theme=Gtk4::IconTheme::get_for_display(Gtk4::Gdk::Display::get_default());
 for my $name (qw/Play Quit Play2 Quit2/)
 {	my $icon=$renderer->Widget($name)->get_icon_name;
@@ -97,6 +99,61 @@ for my $name (qw/Play Quit Play2 Quit2/)
 for my $name (qw/Play Play2 Quit2/)
 {	my $icon=$renderer->Widget($name)->get_icon_name;
 	ok($theme->has_icon($icon),"$name resolved to an icon present in the theme ($icon)");
+}
+
+# Icon resolution must follow the host theme, so it has to be checked against a
+# theme other than whichever one this host happens to be using. A theme created
+# with IconTheme->new can be retargeted; the display's own theme cannot, because
+# set_theme_name refuses to touch the display singleton.
+{	my $adwaita=Gtk4::IconTheme->new;
+	$adwaita->set_theme_name('Adwaita');
+	# add_search_path, not set_search_path: replacing the path would drop the
+	# host theme directories and make every standard name unresolvable.
+	$adwaita->add_search_path('pix');
+	is($adwaita->get_theme_name,'Adwaita','a standalone icon theme can be retargeted');
+
+	my $probe=Layout::Renderer::Gtk4->new
+	(	catalog=>$catalog,
+		frontend=>$frontend,
+		labels=>{play=>'Play',pause=>'Pause',quit=>'Quit'},
+		icon_path=>'pix',
+	);
+	$probe->{icon_theme}=$adwaita;
+
+	# Adwaita carries the full-colour media names, so those must not be
+	# rewritten: the suffixed pass is a fallback, not a preference.
+	SKIP:
+	{	skip 'installed Adwaita has no unsuffixed media-playback-start',1
+			unless $adwaita->has_icon('media-playback-start');
+		is($probe->_IconName('gtk-media-play'),'media-playback-start',
+			'a name the theme carries is used unsuffixed');
+	}
+
+	# Adwaita ships only the symbolic variant of these, which is why the
+	# unsuffixed name alone does not follow the host theme on stock GNOME. The
+	# fallback is only observable while that stays true of the installed
+	# Adwaita, so report a skip rather than a failure if a host ever ships the
+	# unsuffixed name too.
+	for my $pair (['gtk-quit','application-exit'],['gtk-refresh','view-refresh'])
+	{	my ($legacy,$plain)=@$pair;
+		if ($adwaita->has_icon($plain) || !$adwaita->has_icon($plain.'-symbolic'))
+		{	SKIP: { skip "installed Adwaita does not isolate $plain from its symbolic variant",1 }
+			next;
+		}
+		is($probe->_IconName($legacy),$plain.'-symbolic',
+			"$legacy falls back to the symbolic variant the theme provides");
+	}
+
+	# the bundled names still come from pix/ and must not acquire a suffix
+	is($probe->_IconName('gmb-random'),'gmb-random',
+		'a bundled icon is unaffected by the symbolic fallback');
+	is($probe->_IconName('gmb-queue0'),'gmb-queue',
+		'a bundled alias still falls back to the icon that has a file');
+	# an unmapped unknown name must still resolve to nothing rather than to a
+	# fabricated '<name>-symbolic'
+	is($probe->_IconName('no-such-icon-name'),undef,
+		'an unknown name is not turned into a symbolic name');
+	$probe->Destroy;
 }
 
 $renderer->Destroy;

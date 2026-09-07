@@ -76,11 +76,21 @@ application still has no configuration writer, so this is a renderer-level
 round trip, not persistence across application restarts. Pointer dragging,
 physical keyboard input, focus, and accessibility still need comparison.
 Icon-bearing options are resolved by name through `GtkIconTheme` per D023, with
-the bundled `pix/` directory on the search path. `t/gtk4/40_Icons.t` covers the
-legacy `gtk-*` mapping, bundled icons, alias fallback, and the text fallback for
-an unresolvable name. Only `Play` and `Quit` accept icons so far; the remaining
+the bundled `pix/` directory on the search path. Resolution also falls back to
+the `<name>-symbolic` spelling per D024, without which standard names fail on
+Adwaita and so do not follow the host theme on stock GNOME.
+`t/gtk4/40_Icons.t` covers the
+legacy `gtk-*` mapping, bundled icons, alias fallback, the text fallback for
+an unresolvable name, and the symbolic fallback against a theme pinned to
+Adwaita. Only `Play` and `Quit` accept icons so far; the remaining
 99 `icon=` and 17 `stock=` uses in bundled layouts belong to widgets that are
 not implemented yet. Icon artwork is unchanged, so this stays inside D013.
+
+Icon sizes and states are still unhandled: `size=button`, `size=large-toolbar`,
+`size=menu`, `relief=none`, and the two-state `stock="on:... off:..."` form used
+by `LockAlbum`/`LockArtist`. The 28 bundled `gmb-*` names remain app-supplied
+artwork and do not follow the host theme; mapping them to freedesktop names is
+deferred by D023 alternative 2 and has not been proposed for acceptance.
 
 `AB` and `WB` have no direct GTK4 equivalent: `AB` becomes alignment properties
 on its child and `WB` becomes a

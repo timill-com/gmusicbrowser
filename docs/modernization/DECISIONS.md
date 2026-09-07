@@ -120,6 +120,27 @@ Options:
 4. If all are impractical, evaluate a separate frontend process in another
    language while retaining the Perl core.
 
+Evidence recorded so far, against the system
+`libglib-object-introspection-perl` binding and GTK 4.14.5:
+
+- Graphene types cannot be marshalled. `compute_bounds` and `compute_point`
+  both die with `GType GrapheneRect/GraphenePoint ... is not registered with
+  gperl`, so widget geometry must go through `translate_coordinates`, which
+  returns `($ok,$x,$y)`. Every geometry assertion in `t/gtk4/20_Paned.t` and
+  `t/gtk4/30_Box.t` uses that route.
+- `->can(...)` on an introspected class segfaults. Probe for a method by
+  calling it inside `eval` instead.
+- Creating any widget before `Gtk4::init` segfaults, so
+  `GMB::Gtk4::Binding::try_init` (introspection setup only) is not sufficient;
+  `backend_probe` must run first.
+- Boolean arguments must be passed as explicit `0`/`1`. An empty string, such
+  as the result of a failed `$opt=~m/_/`, is mishandled and produces
+  allocations that look like a packing bug.
+- `Gtk4::IconTheme::get_for_display` returns the display singleton, on which
+  `set_theme_name` is refused with an `is_display_singleton` assertion and
+  silently leaves the theme unchanged. Testing icon resolution against a
+  specific theme requires `Gtk4::IconTheme->new`.
+
 ## D007 — Canonical application ID
 
 Status: **Open**
@@ -473,6 +494,73 @@ Evidence or removal condition:
 Covered by renderer tests once icon-bearing widgets exist. Revisit if a bundled
 icon fails to resolve on a supported desktop, or if packaging cannot ship
 `pix/` on the icon search path.
+
+## D024 — Icon resolution falls back to the `-symbolic` variant
+
+Status: **Proposed**
+
+Gate: before the GTK4 renderer grows more icon-bearing widgets
+
+Context:
+
+D023 resolves every icon by name through `GtkIconTheme` so that standard
+freedesktop names follow the host icon theme. Measurement on 2026-09-07 showed
+that resolving the unsuffixed name alone is not enough to reach that goal.
+
+GNOME's Adwaita ships many action icons *only* as `<name>-symbolic`. Checked
+with a standalone `Gtk4::IconTheme` retargeted at each theme, Adwaita has no
+`application-exit`, `view-refresh`, `help-about`, `edit-clear`,
+`view-fullscreen`, `media-skip-forward`, or `media-skip-backward`, but carries
+all of them with the `-symbolic` suffix. KDE's Breeze and Ubuntu's Humanity
+carry both spellings. So the unsuffixed name silently fails on stock GNOME,
+which D022 lists as a required desktop target.
+
+This is measurable inside the test runner itself: because
+`tools/run-gtk4-smoke` isolates the session bus, GTK cannot read the desktop's
+icon-theme preference and falls back to Adwaita. The pre-existing assertion
+that `stock=gtk-quit` resolves to `application-exit` was therefore asserting a
+name that the active theme could not render.
+
+Decision:
+
+`_IconName` tries every candidate in the existing chain unsuffixed first, then
+tries the same candidates with `-symbolic` appended. The unsuffixed pass keeps
+priority so a theme that still carries full-colour artwork keeps supplying it;
+the suffixed pass is a fallback, not a preference. A candidate that already
+ends in `-symbolic` is not suffixed twice. An unmapped unknown name is never
+turned into a fabricated `<name>-symbolic`, so it still resolves to nothing and
+the widget keeps its text label.
+
+Alternatives:
+
+1. Prefer `-symbolic` everywhere. Rejected: it would override full-colour
+   artwork that Breeze, Humanity, and the bundled packs deliberately provide,
+   which is a presentation change rather than a resolution fix.
+2. Map each legacy name directly to a `-symbolic` name in `%StockNames`.
+   Rejected: it hard-codes one theme's convention into the compatibility
+   mapping and loses full-colour artwork where a theme has it.
+3. Leave resolution unsuffixed. Rejected: it does not meet the stated goal of
+   having the host icon theme supply the artwork, because the names fail on a
+   D022 target desktop.
+
+Consequences:
+
+Standard names now follow the host icon theme on stock GNOME as well as Plasma
+and Ubuntu. No layout-visible name changes, so the `icon=`/`stock=`
+compatibility surface under D002 is untouched, and no artwork is added,
+removed, or restyled. This stays inside D013 for the same reason D023 does: it
+repairs resolution of removed infrastructure rather than restyling the
+interface. The `gmb-*` bundled names are unaffected — none of them exists in
+any host theme measured, so they continue to resolve from `pix/`.
+
+Evidence or removal condition:
+
+`t/gtk4/40_Icons.t` pins a standalone `Gtk4::IconTheme` to Adwaita and asserts
+that `gtk-media-play` stays unsuffixed while `gtk-quit` and `gtk-refresh` fall
+back to the symbolic variant. Run against the previous resolver those two
+assertions fail, returning `application-exit` and `view-refresh`. Revisit if a
+supported theme is found where the suffixed name is worse than the unsuffixed
+one.
 
 ## Decision template
 

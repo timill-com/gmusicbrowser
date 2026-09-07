@@ -1,7 +1,7 @@
 # Session handoff
 
-Status: uncommitted work in the tree, GTK4 box packing corrected and GTK4 icon
-resolution added
+Status: uncommitted work in the tree, GTK4 icon resolution given a `-symbolic`
+fallback; several earlier verification claims corrected after re-measurement
 
 Last session: 2026-09-07. Branch `gtk4-alpha`.
 
@@ -22,31 +22,31 @@ otherwise from the size of the planning documents.
 - The current branch is `gtk4-alpha`. A separate `gtk4` branch exists but points
   at the same commit as `master`.
 
-## Uncommitted work in the tree
+## What is committed and what is not
 
-Nothing has been committed. `git status` shows:
+The previous session's work **is committed**. `HEAD` is `e016554`
+"gtk4: correct box packing geometry and resolve icons by theme name", and
+`gtk4-alpha` is four commits past `master`. An earlier revision of this file
+claimed that work was uncommitted and listed a `git status` that no longer
+applies; that listing has been removed rather than corrected, because it
+described a tree state that no longer exists.
 
+This session's changes are uncommitted:
+
+	M docs/modernization/DECISIONS.md
 	M docs/modernization/PARITY_CHECKLIST.md
+	M docs/modernization/SESSION_HANDOFF.md
 	M docs/modernization/TESTING.md
 	M gmusicbrowser_gtk4_layout.pm
-	M t/04_Gtk4LayoutRenderer.t
-	M tools/run-gtk4-smoke
-	?? docs/modernization/SESSION_HANDOFF.md
-	?? t/gtk4/20_Paned.t
-	?? t/gtk4/30_Box.t
-	?? t/gtk4/40_Icons.t
-	?? t/layouts/containers.layout
-	?? t/layouts/icons.layout
-	?? t/layouts/packing.layout
-	?? t/layouts/single.layout
+	M t/gtk4/40_Icons.t
 
-`docs/modernization/DECISIONS.md` gained D023 for GTK4 icon handling.
+No GTK3 production code, bundled layout, or file in `pix/` was touched. No file
+was added or removed.
 
-`t/gtk4/20_Paned.t` was also edited this session: its window-resize step used
-`set_default_size`, which does nothing to an already-mapped Wayland window.
+## Renderer container state, carried forward
 
-The renderer went from 2 containers to 8, ordered by how often each appears in
-the bundled layouts rather than alphabetically:
+The renderer covers 8 of the 15 container types, ordered by how often each
+appears in the bundled layouts:
 
 | Container | Uses in `layouts/` | State |
 |---|---:|---|
@@ -57,35 +57,84 @@ the bundled layouts rather than alphabetically:
 | `NB` | 16 | not started |
 | `TB`, `FB` | 4 | not started |
 
-What changed in `gmusicbrowser_gtk4_layout.pm`:
+`_CreateBox` implements the full legacy `BoxPack` prefix set: digits are
+padding, `_` is expand, `-` packs from the far edge, `.` turns fill off. It
+keeps a single insertion point: once any `-` child has been packed, every later
+child is inserted after the last start-packed child with `insert_child_after`,
+which reproduces both groups' legacy order including interleaved `-a b -c d`.
+`insert_child_after($widget,undef)` prepends, correct when no start child
+exists yet. `_CreatePaned` implements `PanedPack`, and `_CreateSingle` covers
+`SB`, `FR`, `EB`, `AB`, and `WB`.
 
-- `_CreateContainer` now dispatches by element instead of handling only boxes.
-- `_CreateBox` implements the full legacy `BoxPack` prefix set: digits are
-  padding, `_` is expand, `-` packs from the far edge, `.` turns fill off. The
-  previous renderer rejected `-` and `.` outright.
-- `_CreatePaned` implements `PanedPack`: `_` is resize, `+` disables shrink,
-  and the `size` option sets the initial handle position.
-- `_CreateSingle` covers `SB`, `FR`, `EB`, `AB`, and `WB`.
-- The generic `border` container option becomes margins.
+## This session: the `-symbolic` fallback (D024)
 
-The first container increment brought `t/04_Gtk4LayoutRenderer.t` to 44
-assertions. Pane saved-size coverage brought it to 88; the box packing
-increment brings it to 105, and the whole offline suite to 261. All pass.
+The user's goal is that the OS icon theme supplies the artwork. D023 already
+resolves icons by name, so the assumption was that standard freedesktop names
+already follow the host theme. Measurement showed that assumption is wrong on
+one of the D022 target desktops.
 
-`_CreateBox` was rewritten this session. The previous version had two defects,
-both now corrected and covered by real geometry tests:
+GNOME's Adwaita ships many action icons **only** as `<name>-symbolic`. It has
+no `application-exit`, `view-refresh`, `help-about`, `edit-clear`,
+`view-fullscreen`, `media-skip-forward`, or `media-skip-backward`, but carries
+every one of them suffixed. Breeze and Humanity carry both spellings. So the
+unsuffixed name silently failed on stock GNOME.
 
-- It set fill on the cross axis with `set_valign`/`set_halign` reversed.
-  Legacy `fill` acts on the packing axis and only matters while expanding.
-- It used `prepend` for `-`, which placed end-packed children at the near edge
-  in reverse. Legacy `pack_end` places them at the far edge, first one
-  outermost.
+`_IconName` now tries the whole existing candidate chain unsuffixed first, then
+the same chain with `-symbolic` appended. Unsuffixed keeps priority so a theme
+that still ships full-colour artwork keeps supplying it; a candidate already
+ending in `-symbolic` is not suffixed twice; an unmapped unknown name is never
+turned into a fabricated `<name>-symbolic`, so it still falls back to text.
+Recorded as D024, status **Proposed**.
 
-The replacement keeps a single insertion point: once any `-` child has been
-packed, every later child is inserted after the last start-packed child with
-`insert_child_after`, which reproduces both groups' legacy order including
-interleaved `-a b -c d`. `insert_child_after($widget,undef)` prepends, which is
-correct when no start child exists yet.
+Why this is inside D013: it changes no artwork, adds and removes no file, and
+changes no layout-visible name. It repairs resolution of infrastructure GTK4
+removed, which is the same ground D023 stands on. It is not a restyling.
+
+## Why the recommended increment was NOT done
+
+The handoff's suggested next step was to map the bundled `gmb-*` names to
+freedesktop names. That was not done, for two reasons found while reading:
+
+1. D023 alternative 2 **already deferred exactly this**, citing D013. Doing it
+   would have quietly overridden an existing decision entry.
+2. The `gmb-*` files are the artwork behind gmusicbrowser's own user-facing
+   preference. `gmusicbrowser.pl:7023` builds an "Icon theme :" combo from
+   `GetIconThemesList`, and `pix/` ships three packs — `elementary`,
+   `gnome-classic`, and `oxygen` — that exist solely to re-skin those names.
+   Replacing `gmb-random` with `media-playlist-shuffle` would not be
+   infrastructure replacement; it would delete the artwork a documented
+   feature selects between. That needs its own accepted decision.
+
+Also worth knowing before proposing that mapping: `view-list-tree`,
+`view-list`, `view-grid`, `system-search`, and `edit-find` are each missing
+from at least one installed theme, so several `gmb-view-*` names have no
+reliably available standard equivalent. Nothing was removed from `pix/`; the
+user was not asked to, because no removal was proposed.
+
+## Verification claims that did not reproduce
+
+Three recorded results were wrong. They are corrected in `TESTING.md`; the
+method that produced each bad reading is recorded because the same traps are
+easy to hit again.
+
+- **"Yaru theme", and `application-exit`/`view-refresh`/`edit-find` absent.**
+  Yaru is not installed on this host at all. The desktop theme is **Tela**, and
+  all three names resolve under it. The absence is real, but it belongs to
+  Adwaita.
+- **The theme active during `make test-gtk4` is the desktop's.** It is not. The
+  runner unsets the session bus, so GTK cannot read the icon-theme preference
+  and uses **Adwaita**. This is why a pre-existing assertion expected
+  `application-exit`, a name the active theme cannot render. That assertion now
+  accepts either spelling.
+- **The GTK3 `-cmd Quit` smoke "exited zero".** It exits **2**. `Net::DBus` is
+  missing, so `gmusicbrowser.pl` warns that `gmusicbrowser_dbus.pm` failed to
+  load and then calls the undefined `GMB::DBus::simple_call` at
+  `gmusicbrowser.pl:512` anyway. A pristine `git archive` of HEAD fails
+  identically, so it is pre-existing and not a GTK4 regression. The earlier
+  "exited zero" was most likely `tail`'s exit status from a pipeline. There is
+  currently **no** working scripted GTK3 startup/shutdown smoke on this host:
+  `-nodbus` does not deliver the command, the window stays open, and the
+  process outlives `timeout` and must be killed.
 
 ## Verification status: read this before claiming anything
 
@@ -104,26 +153,32 @@ No row was advanced to `Parity review`. Real allocation and action signals are
 not sufficient for complete input, focus, accessibility, and saved-profile
 parity. `AGENTS.md` forbids reporting a skipped or reasoned-about test as a pass.
 
-Commands that were actually run and passed:
+The icon assertions added this session are also behaviour, not construction.
+Against the previous `_IconName`, `t/gtk4/40_Icons.t` fails 2 assertions,
+returning `application-exit` and `view-refresh` where Adwaita can render only
+the symbolic spellings. Confirmed by running the new test against a scratch
+copy of the tree carrying the old resolver.
+
+Commands that were actually run and passed this session:
 
 	prove -I. t/02_LayoutParser.t t/03_FrontendContract.t \
 	      t/04_Gtk4LayoutRenderer.t t/05_FrontendLegacy.t t/06_LifecycleLegacy.t
 	perl -c gmusicbrowser_gtk4_layout.pm
-	perl -c t/04_Gtk4LayoutRenderer.t
-	perl -c t/gtk4/20_Paned.t
-	perl -c t/gtk4/30_Box.t
-	sh -n tools/run-gtk4-smoke
+	perl -c t/gtk4/40_Icons.t
 	make test-modernization
 	make test-gtk4
 	git diff --check
 
-`make test-modernization`: 261 executed assertions passed, no skips.
+`make test-modernization`: 261 executed assertions passed, no skips. Unchanged
+by this session; the renderer doubles never reach a real icon theme.
 
-`make test-gtk4` on the real Wayland connection: 160 TAP results, comprising
-154 executed assertions passed and the same six pre-existing feasibility
-probes skipped, 0 failures. That is 84 pane, 34 box, and 20 icon assertions
-plus the binding and proof-of-life files. Do not restate this as 160 passing
-assertions.
+`make test-gtk4` on the real Wayland connection: 167 TAP results, comprising
+161 executed assertions passed and the same six pre-existing feasibility
+probes skipped, 0 failures. That is 84 pane, 34 box, and 27 icon assertions
+plus the binding and proof-of-life files. Do not restate this as 167 passing
+assertions. The six skips were counted from `prove -v` output, not assumed, and
+they are the same six M1 probes as before: the icon test's own theme-premise
+guards did not fire on this host, so all three symbolic assertions executed.
 
 Pane tests exercise both orientations, saved-size reconstruction, notification
 state before saving, focus/action signals, and real window resizing under all
@@ -134,11 +189,12 @@ keyboard input is not covered by either.
 GTK3 comparison: the unchanged production `BoxPack` was extracted from
 `gmusicbrowser_layout.pm` and driven by the same fixture, parser, width, child
 size request and text direction. GTK3 and GTK4 produced identical offsets and
-widths in all three rows; the table is in `TESTING.md`. GTK3 also started with
-`-layout "with playlist"`, accepted `-cmd Quit`, wrote its configuration and
-exited zero, with only the three pre-existing warnings. That is a startup and
-shutdown smoke plus a focused packing comparison, not a full GTK3 application
-regression pass. No shared or GTK3 production code changed.
+widths in all three rows; the table is in `TESTING.md`. That is a focused
+packing comparison, not a full GTK3 application regression pass. The GTK3
+startup/shutdown smoke that previously accompanied it does not actually pass
+on this host; see the corrections section above. No shared or GTK3 production
+code changed this session, and this session's change is confined to the GTK4
+renderer, so the GTK3 path cannot be affected by it.
 
 `t/01_ModFileMetadata.t` still fails: it downloads media samples and the
 repository ships none. That is the pre-existing M0 gap, not a regression.
@@ -214,9 +270,16 @@ Two bugs the real test caught, worth knowing about:
 Not covered: only `Play` and `Quit` accept icons, because they are the only
 icon-capable widgets implemented. The other 99 `icon=` and 17 `stock=` uses in
 bundled layouts belong to unimplemented widgets. Icon size options
-(`size=button`, `size=large-toolbar`, `size=menu`), `relief=none`, the
-`stock="on:... off:..."` two-state form used by `LockAlbum`, and symbolic
-variants are all unhandled. No GTK3 icon code was touched.
+(`size=button`, `size=large-toolbar`, `size=menu`), `relief=none`, and the
+`stock="on:... off:..."` two-state form used by `LockAlbum`/`LockArtist` are
+all still unhandled. Symbolic variants are now handled, as D024. No GTK3 icon
+code was touched.
+
+Still true after this session: the 28 bundled `gmb-*` names are app-supplied
+artwork and do **not** follow the host icon theme. That is the remaining gap
+against the user's stated goal, and closing it needs an accepted decision
+because those files back the "Icon theme :" preference. None of the 28 names
+exists in any installed host theme, so they cannot be shadowed by one.
 
 ## Do not repeat this dead end
 
@@ -243,11 +306,18 @@ means the reported ~1190px window is not the layout's designed size.
    packages, outside the execution sandbox when needed. Count explicit skips.
 2. Write the `DECISIONS.md` entries for `AB` and `WB`. These are the oldest
    outstanding item and they block those two rows from ever reaching parity.
-3. Add a D006 evidence note that this binding cannot marshal graphene types,
-   so `compute_bounds`/`compute_point` are unavailable and geometry must go
-   through `translate_coordinates`.
+   **Still not done.** This session did the D006 note and the symbolic
+   fallback instead; `AB`/`WB` remain approximations and must not be advanced
+   to parity until their entries are accepted.
+3. Add a D006 evidence note about graphene types. **Done this session.** D006
+   now records the graphene marshalling failure, the `->can` segfault, the
+   widget-before-`Gtk4::init` segfault, the empty-string boolean artifact, and
+   the `set_theme_name` display-singleton refusal.
 4. Move D023 from Proposed to Accepted, or push back on it, before more
-   icon-bearing widgets are added.
+   icon-bearing widgets are added. D024 is now in the same position: both are
+   Proposed and both concern icon resolution, so decide them together.
+   Decide also whether to propose mapping `gmb-*` to freedesktop names, which
+   D023 alternative 2 currently defers and which this session did not do.
 5. Investigate the queue clipping properly: make `QueueList` propagate a
    minimum width from its configured columns. See the dead-end section above
    before touching `layouts/shimmer.layout`; the obvious `+` fix is disproven.
@@ -301,3 +371,28 @@ means the reported ~1190px window is not the layout's designed size.
 - `t/layouts/packing.layout` is the box fixture. Its rows deliberately include
   an expanding child, because a `-` child only reaches the far edge when some
   child expands.
+- **Icon-theme testing must not use the display singleton.**
+  `Gtk4::IconTheme::get_for_display` returns it, and `set_theme_name` on it is
+  refused with a `gtk_icon_theme_set_theme_name: assertion
+  '!self->is_display_singleton' failed` critical while silently leaving the
+  theme unchanged. A first attempt at a cross-theme table this way produced 38
+  names by 5 themes of identical all-YES results: it measured the live theme
+  five times. Use `Gtk4::IconTheme->new` and `set_theme_name` on that. The
+  renderer's `{icon_theme}` field can be pre-seeded with such an object to
+  drive `_IconName` against a chosen theme.
+- Use `add_search_path`, never `set_search_path`, when adding `pix/`.
+  `set_search_path(['pix'])` replaces the whole path, so the host theme
+  directories disappear and every standard name becomes unresolvable. That
+  briefly looked like the resolver preferring bundled artwork.
+- **The icon theme inside `tools/run-gtk4-smoke` is Adwaita, not the
+  desktop's.** The runner unsets the session bus, so GTK cannot read the
+  icon-theme preference. Separately, its temporary `XDG_DATA_HOME` hides
+  `~/.local/share/icons`, so a theme installed there keeps its name in
+  gsettings while its files are unreachable. Any assertion about specific
+  artwork must be written against Adwaita, or accept either spelling.
+- Do not hard-code a full-colour freedesktop name in a test expectation.
+  Adwaita ships many action icons only as `-symbolic`, so a bare
+  `application-exit` expectation fails there even though resolution is correct.
+- GTK3 with `-cmd` and no `Net::DBus` exits 2 at `gmusicbrowser.pl:512`, and
+  with `-nodbus` it hangs past `timeout` and must be `pkill`ed. Budget for
+  cleaning up stray `gmusicbrowser.pl` processes if you try either.

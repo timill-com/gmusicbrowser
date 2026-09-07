@@ -68,9 +68,9 @@ The action test uses [cycle-handle-focus](https://docs.gtk.org/gtk4/signal.Paned
 before [move-handle](https://docs.gtk.org/gtk4/signal.Paned.move-handle.html).
 
 `t/gtk4/30_Box.t` adds real `HB`/`VB` packing geometry to the runner. On
-2026-09-07 the full `make test-gtk4` run reported 160 TAP results: 154 executed
+2026-09-07 the full `make test-gtk4` run reported 167 TAP results: 161 executed
 assertions passed and the same six feasibility probes were skipped. The box file
-contributes 34 executed assertions and the icon file 20. They read allocated child offsets with
+contributes 34 executed assertions and the icon file 27. They read allocated child offsets with
 [translate_coordinates](https://docs.gtk.org/gtk4/method.Widget.translate_coordinates.html);
 `compute_bounds` and `compute_point` are unusable through this binding, which
 reports `GType GrapheneRect ... is not registered with gperl`. That is a
@@ -114,32 +114,81 @@ effect on an already-mapped Wayland window. `t/gtk4/20_Paned.t` used
 on that account, before and independently of the box change; it now uses
 `set_size_request`, and all 84 pane assertions pass.
 
-`t/gtk4/40_Icons.t` covers GTK4 icon resolution with 20 executed assertions on
+`t/gtk4/40_Icons.t` covers GTK4 icon resolution with 27 executed assertions on
 real Wayland. It uses `t/layouts/icons.layout`, which exercises a legacy `gtk-*`
 name, the `stock=` option, a bundled `gmb-*` file, a bundled alias with no file
-of its own, an unresolvable name, and a widget with no icon option.
+of its own, an unresolvable name, and a widget with no icon option. It then
+pins a standalone icon theme to Adwaita to check the `-symbolic` fallback added
+for D024.
 
-Measured on this host (GTK 4.14.5, Yaru theme), which is why the resolution
-chain exists rather than a direct pass-through:
+Measured against GTK 4.14.5, which is why the resolution chain exists rather
+than a direct pass-through:
 
 - 14 of the 15 legacy `gtk-*` names used by bundled layouts resolve to nothing
   in GTK4; only `gtk-fullscreen` is still found. GTK4 removed the stock-item
   system, so these need explicit mapping.
 - Bundled `gmb-*` names resolve straight from the flat `pix/` directory once it
   is on the search path; no themed `index.theme` hierarchy and no file moves.
+  None of the 28 bundled names exists in any host theme checked, so they cannot
+  be shadowed by one.
 - `gmb-queue0`, `gmb-queue-window`, `gmb-random-album`, and
   `gmb-view-fullscreen` ship no file of their own and need the same fallback
   indirection GTK3 applies through `%IconsFallbacks`.
-- Several freedesktop names are themselves absent here, including
-  `application-exit`, `view-refresh`, and `edit-find`. A mapped name that the
-  active theme lacks still renders: `lookup_icon` returns a paintable because
-  GTK substitutes its missing-image icon, confirmed with a mapped button that
-  allocated 188x70 and displayed. So the resolver keeps a mapped name even when
-  `has_icon` is false, and only an unmapped unknown name falls back to text.
+- A mapped name that the active theme lacks still renders: `lookup_icon`
+  returns a paintable because GTK substitutes its missing-image icon, confirmed
+  with a mapped button that allocated 188x70 and displayed. So the resolver
+  keeps a mapped name even when `has_icon` is false, and only an unmapped
+  unknown name falls back to text.
+
+Which icon theme is actually active during a run, corrected on 2026-09-07:
+
+- Inside `tools/run-gtk4-smoke` the theme is **Adwaita**. The runner unsets the
+  session bus, so GTK cannot read the desktop's icon-theme preference and uses
+  its own default. Assertions about specific artwork must account for this
+  rather than for the developer's desktop theme.
+- Outside the runner this host resolves **Tela**, from
+  `~/.local/share/icons`. A temporary `XDG_DATA_HOME`, which the runner sets,
+  removes that directory from the search path, so the theme name stays "Tela"
+  while its files are unreachable and lookups fall through to hicolor/Adwaita.
+- An earlier revision of this file recorded the host theme as Yaru and stated
+  that `application-exit`, `view-refresh`, and `edit-find` are absent here.
+  Neither claim reproduces: Yaru is not installed on this host at all, and all
+  three names resolve under Tela. The absence is real but belongs to Adwaita,
+  not to this host's desktop theme.
+
+Cross-theme availability, measured with `Gtk4::IconTheme->new` retargeted per
+theme. `Gtk4::IconTheme::get_for_display` returns the display singleton, and
+`set_theme_name` on it is refused with an `is_display_singleton` assertion
+while silently leaving the theme in place; a first attempt using the singleton
+produced a 38-by-5 table of identical results that measured the live theme five
+times and proved nothing. Only the standalone object discriminates:
+
+| Name | Adwaita | Breeze | Humanity | Tela | kora |
+|---|---|---|---|---|---|
+| `media-playback-start` | yes | yes | yes | yes | yes |
+| `list-add`, `window-close` | yes | yes | yes | yes | yes |
+| `application-exit` | no | yes | yes | yes | yes |
+| `view-refresh` | no | yes | yes | yes | yes |
+| `help-about`, `edit-clear` | no | yes | yes | yes | yes |
+| `view-fullscreen` | no | yes | yes | yes | yes |
+| `media-skip-forward`/`-backward` | no | yes | yes | yes | yes |
+| `edit-find` | no | yes | no | yes | yes |
+| `application-exit-symbolic` | yes | yes | yes | yes | yes |
+| `view-refresh-symbolic` | yes | yes | yes | yes | yes |
+
+Adwaita carries the `-symbolic` spelling of every action name in that list.
+That is the measurement behind D024: 20 of the names checked go from four of
+five themes to all five once the suffixed fallback is tried. Adwaita matters
+because D022 makes stock GNOME a required target.
 
 With `icon_path` omitted or pointing at a missing directory, rendering still
 succeeds: standard names resolve, bundled names return nothing and the widget
 keeps its text label.
+
+The symbolic fallback is a behaviour change, not a construction detail. Run
+against the previous `_IconName` in a scratch copy of the tree,
+`t/gtk4/40_Icons.t` fails 2 assertions, returning `application-exit` and
+`view-refresh` where Adwaita can render only the symbolic variants.
 
 A reduced GTK3 probe on 2026-09-07 copied the legacy pane calculations into
 `/tmp/gmb-legacy-paned-wayland.pl`, used two labels, temporary XDG config/data/
@@ -155,10 +204,26 @@ GTK3/GTK4 parity comparison. The temporary script is not a permanent test.
 The GTK3 entry point also completed an isolated Wayland startup and orderly
 shutdown smoke. That run reported an unavailable optional MPRIS2 dependency,
 an inactive mpv backend, and one GTK widget assertion; it is not yet a clean
-GTK3 acceptance result. Repeated on 2026-09-07 after the box change with
-`-layout "with playlist"` and temporary XDG directories, GTK3 started, accepted
-`-cmd Quit`, wrote its configuration and exited zero with the same three
-pre-existing warnings. `perl -c gmusicbrowser_layout.pm` fails on the `_"..."`
+GTK3 acceptance result.
+
+Correction recorded on 2026-09-07: an earlier revision of this file stated that
+`perl gmusicbrowser.pl -layout "with playlist" -cmd Quit` with temporary XDG
+directories "wrote its configuration and exited zero". It does not on this
+host. It exits **2**, because `Net::DBus` is not installed: `gmusicbrowser.pl`
+warns that `gmusicbrowser_dbus.pm` failed to load and then calls
+`GMB::DBus::simple_call` at `gmusicbrowser.pl:512` regardless, which is an
+undefined subroutine. The earlier "exited zero" reading was probably the exit
+status of a `tail` at the end of a pipeline rather than of perl.
+
+This is pre-existing and unrelated to the GTK4 work: a pristine `git archive`
+of HEAD fails identically with the same error and the same exit status. It is
+only reached when `-cmd` is passed without `-nodbus`. Passing `-nodbus`
+instead does not give a usable smoke either: the command is not delivered, the
+window stays open, and the process outlives `timeout`, so it has to be killed.
+Until `Net::DBus` is available or that code path is fixed, there is no
+scripted GTK3 startup/shutdown smoke on this host. Do not cite one as passing.
+
+`perl -c gmusicbrowser_layout.pm` fails on the `_"..."`
 gettext idiom for the committed file as well; that module is not standalone
 compilable and the failure is not a regression.
 
