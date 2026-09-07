@@ -418,4 +418,73 @@ _drain();
 	_drain();
 }
 
+# Legacy font=/color= as real rendering. GTK4 removed the per-widget font and
+# colour overrides Layout::Label used, so both go through a CSS provider (D031).
+# font= is a physical measurement; a colour is not, so it is read back from the
+# style context instead.
+{	my $sfixture=File::Spec->catfile('t','layouts','styling.layout');
+	my $scatalog=Layout::Parser::ParseFiles(files=>[$sfixture]);
+	is(scalar @{$scatalog->{diagnostics}},0,'styling fixture parses without diagnostics');
+	my $srenderer2=Layout::Renderer::Gtk4->new
+	(	catalog=>$scatalog,
+		frontend=>$frontend,
+		labels=>GMB::Test::RendererLabels::labels(),
+	);
+	my $sroot=$srenderer2->Render('gtk4 styling');
+	$sroot->set_direction('ltr');
+	my $swindow2=Gtk4::Window->new;
+	$swindow2->set_default_size(700,300);
+	$swindow2->set_child($sroot);
+	$swindow2->present;
+	ok(_wait_for_window($swindow2),'GTK4 window mapped before styling assertions');
+	_drain();
+
+	# every styling label carries the identical text 'Wg', so only the option
+	# can change the measurement
+	my %h=map {($_=>($srenderer2->Widget($_)->measure('vertical',-1))[0])}
+		qw/Text Text2 Text3 Text4/;
+	# the theme default is the baseline: font= is a ratio against 10pt, so a
+	# font=20 is 200% and must measure well above the unstyled label
+	cmp_ok($h{Text2},'>',$h{Text},'font=20 renders larger than the theme default');
+	cmp_ok($h{Text3},'<',$h{Text},'font=8 renders smaller than the theme default');
+	cmp_ok($h{Text2},'>',$h{Text3}*2,'font=20 is more than twice font=8');
+	# the class is the mechanism, and it is a fixed ratio rather than an
+	# absolute point size, which is what lets the desktop font through
+	ok($srenderer2->Widget('Text2')->has_css_class('gmb-font-200'),
+		'font=20 becomes a 200% ratio of the theme font, not an absolute size');
+	ok($srenderer2->Widget('Text3')->has_css_class('gmb-font-80'),
+		'font=8 becomes an 80% ratio');
+	# control: an unstyled label gets no font class at all, and a value with no
+	# size in it is refused rather than guessed
+	ok(!grep(m/^gmb-font-/,@{$srenderer2->Widget('Text')->get_css_classes}),
+		'a label with no font= gets no font class');
+	is($h{Text4},$h{Text},'an unparseable font= leaves the theme font alone');
+	is_deeply($srenderer2->Unhandled('Text4'),['font'],'an unparseable font= is reported');
+
+	# colour does not change geometry, so a measurement would be vacuous here:
+	# the style context is the observable
+	my $plain=$srenderer2->Widget('Label')->get_style_context->get_color->to_string;
+	my $white=$srenderer2->Widget('Label3')->get_style_context->get_color->to_string;
+	is($white,'rgb(255,255,255)','an explicit colour reaches the rendered text colour');
+	isnt($white,$plain,'an explicit colour differs from the theme colour');
+	# a grey is the legacy spelling of de-emphasis, which GTK4 expresses with
+	# the dim-label class so it follows the theme and its dark variant. That
+	# class styles by opacity at draw time, so get_color cannot observe it and
+	# the class itself is the only available check.
+	ok($srenderer2->Widget('Label2')->has_css_class('dim-label'),
+		'color=grey becomes the theme-following dim-label class');
+	ok(!grep(m/^gmb-color-/,@{$srenderer2->Widget('Label2')->get_css_classes}),
+		'color=grey does not also pin a literal grey');
+	is($srenderer2->Widget('Label4')->get_style_context->get_color->to_string,$plain,
+		'an invalid colour leaves the theme colour alone');
+	is_deeply($srenderer2->Unhandled('Label4'),['color'],'an invalid colour is reported');
+	# control: an unstyled label carries neither styling class
+	ok(!grep(m/^gmb-color-|^dim-label$/,@{$srenderer2->Widget('Label')->get_css_classes}),
+		'a label with no color= gets no colour class');
+
+	$srenderer2->Destroy;
+	$swindow2->destroy;
+	_drain();
+}
+
 done_testing;

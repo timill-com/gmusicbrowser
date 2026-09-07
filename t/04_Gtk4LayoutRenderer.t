@@ -54,6 +54,11 @@ use lib '.';
 		return ($min,$min,-1,-1);
 	}
 	sub set_layout_manager { $_[0]{layout_manager}=$_[1] }
+	# GTK4 styles a widget through CSS classes, which is how font=/color= are
+	# applied; the real widget keeps them in order and reports them back
+	sub add_css_class { push @{$_[0]{css}},$_[1] }
+	sub get_css_classes { return $_[0]{css} || [] }
+	sub has_css_class { my ($s,$c)=@_; return scalar grep {$_ eq $c} @{$s->{css}||[]} }
 }
 {	package Gtk4::ConstraintLayout;
 	sub new { bless {constraints=>[]},$_[0] }
@@ -73,6 +78,27 @@ use lib '.';
 	sub get_constant { $_[0]{constant} }
 	sub get_strength { $_[0]{strength} }
 }
+{	package Gtk4::CssProvider;
+	sub new { bless {},$_[0] }
+	# the real method needs the byte length as a second argument through this
+	# binding, so the double requires it too rather than accepting one arg
+	sub load_from_data
+	{	my ($self,$css,$length)=@_;
+		die "load_from_data needs a length\n" unless defined $length;
+		die "load_from_data length disagrees with the data\n" unless $length==length $css;
+		$self->{css}=$css;
+	}
+}
+{	package Gtk4::StyleContext;
+	our @providers;
+	sub add_provider_for_display { push @providers,$_[1] }
+}
+# Gtk4::Gdk::Display is deliberately NOT doubled. These tests assert that the
+# renderer works with no display at all, which is what makes _IconTheme return
+# undef and every icon fall back to text; supplying one would quietly remove
+# that coverage. It also means the CSS provider cannot be installed offline, so
+# a generated font=/color= rule is reported through Unhandled here and its
+# rendering is proved on real Wayland in t/gtk4/30_Box.t instead.
 {	package Gtk4::Box;
 	our @ISA=('Gtk4::Widget::Double');
 	sub new { bless {orientation=>$_[1],spacing=>$_[2],children=>[]},$_[0] }
@@ -634,5 +660,80 @@ is_deeply([$zrenderer->Widget('Label5')->get_size_request],[55,70],'merging a la
 # sizing options are handled, so they are not reported as ignored
 is($zrenderer->Unhandled('Label4'),undef,'a sizing option is not reported as unhandled');
 $zrenderer->Destroy;
+
+# Legacy font=/color= translation. GTK4 removed the per-widget overrides
+# Layout::Label used, so both become CSS (D031). These offline doubles have no
+# display, so a generated rule cannot be installed and is reported instead;
+# the rendering itself is proved on real Wayland in t/gtk4/30_Box.t.
+{	my $sfixture=File::Spec->catfile('t','layouts','styling.layout');
+	my $scatalog=Layout::Parser::ParseFiles(files=>[$sfixture]);
+	is(scalar @{$scatalog->{diagnostics}},0,'styling fixture parses without diagnostics');
+	my $renderer=Layout::Renderer::Gtk4->new
+	(	catalog=>$scatalog,
+		frontend=>$frontend,
+		labels=>GMB::Test::RendererLabels::labels(),
+	);
+	$renderer->Render('gtk4 styling');
+	# A grey is de-emphasis, and dim-label ships with GTK4, so it applies with
+	# no provider and is the one styling that works here.
+	ok($renderer->Widget('Label2')->has_css_class('dim-label'),
+		'color=grey becomes dim-label without needing a provider');
+	is($renderer->Unhandled('Label2'),undef,'a mapped grey is not reported');
+	# Everything needing a generated rule cannot be applied without a display,
+	# and must be reported rather than silently swallowed.
+	is_deeply($renderer->Unhandled('Text2'),['font'],
+		'a font= needing a provider is reported when none can be installed');
+	is_deeply($renderer->Unhandled('Label3'),['color'],
+		'an explicit colour needing a provider is reported likewise');
+	is_deeply($renderer->Unhandled('Text4'),['font'],'an unparseable font= is reported');
+	is_deeply($renderer->Unhandled('Label4'),['color'],'an invalid colour is reported');
+	# control: a widget naming neither option reports nothing and carries no
+	# styling class, so the comparison turns on the options
+	is($renderer->Unhandled('Text'),undef,'a label with no styling options reports nothing');
+	is_deeply($renderer->Widget('Text')->get_css_classes,[],
+		'a label with no styling options gets no css class');
+	# the provider is installed on the display, so Destroy must take it off
+	# again or it outlives the widget tree it was created for
+	$renderer->{style_provider}='sentinel';
+	$renderer->{style_rules}={'gmb-font-200'=>'font-size: 200%'};
+	$renderer->Destroy;
+	is($renderer->{style_provider},undef,'Destroy releases the style provider');
+	is($renderer->{style_rules},undef,'Destroy drops the collected style rules');
+}
+
+# The font= and colour translation itself, independent of any display. These
+# are the arithmetic and the grey classification, which is where the parity
+# exception in D031 actually lives.
+{	my $r=bless {unhandled=>{}},'Layout::Renderer::Gtk4';
+	# the ratio is fixed against the 10pt baseline the bundled layouts were
+	# authored against, NOT against the live theme size: dividing by the live
+	# size cancels out and reproduces the absolute legacy points, which is what
+	# would stop the desktop font reaching the widget
+	is(Layout::Renderer::Gtk4::LEGACY_FONT_BASELINE(),10,
+		'the legacy font baseline is the 10pt GTK3 default');
+	# _StyleRule cannot run without a provider here, so the class name is
+	# checked through the rule generator's own naming
+	# a '#' inside qw() would start a comment, so these are listed explicitly
+	my %grey=map {($_=>Layout::Renderer::Gtk4::_IsGrey($_))}
+		('grey','gray','Grey','silver','darkgrey','#ccc','#888888',
+		 'white','red','#f00','#1a2b3c');
+	ok($grey{$_},"'$_' is classified as a grey") for qw/grey gray Grey silver darkgrey/;
+	ok($grey{'#ccc'},'a short hex with equal channels is a grey');
+	ok($grey{'#888888'},'a long hex with equal channels is a grey');
+	ok(!$grey{$_},"'$_' is not a grey") for qw/white red/;
+	ok(!$grey{'#f00'},'a hex with unequal channels is not a grey');
+	ok(!$grey{'#1a2b3c'},'a long hex with unequal channels is not a grey');
+	# a grey maps to dim-label with no provider; a non-grey needs one and so
+	# returns nothing here, which is what the reporting above relies on
+	is($r->_ColorRule('grey'),'dim-label','a grey maps to the theme-following class');
+	is($r->_ColorRule('#ccc'),'dim-label','a grey hex maps to the same class');
+	is($r->_ColorRule('white'),undef,'a non-grey needs a provider and reports without one');
+	is($r->_ColorRule(''),undef,'an empty colour is refused');
+	is($r->_ColorRule(undef),undef,'a missing colour is refused');
+	# a font= with no size in it cannot be translated at all, provider or not
+	is($r->_FontRule('oops'),undef,'a font= naming no size is refused');
+	is($r->_FontRule(''),undef,'an empty font= is refused');
+	is($r->_FontRule('0'),undef,'a zero font size is refused');
+}
 
 done_testing;

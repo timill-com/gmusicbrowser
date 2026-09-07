@@ -91,9 +91,10 @@ my %ButtonHandled= map {$_=>1} qw/icon stock text tip size relief minwidth minhe
 # The same for a Layout::Label widget. 'markup' is deliberately absent: it goes
 # through ::UsedFields and per-song substitution, so it belongs with a real
 # Layout::Label port rather than with these presentation options. So are
-# 'font'/'color', which GTK4 moved from widget overrides to CSS, and 'minsize'/
-# 'expand_max', which drive the legacy scrolling-label machinery.
-my %LabelHandled= map {$_=>1} qw/text xalign yalign ellipsize minwidth minheight/;
+# 'minsize'/'expand_max', which drive the legacy scrolling-label machinery.
+# 'font'/'color' are handled through CSS, which is where GTK4 moved the widget
+# overrides Layout::Label used; see D031.
+my %LabelHandled= map {$_=>1} qw/text xalign yalign ellipsize minwidth minheight font color/;
 
 # The legacy Layout::Label defaults (gmusicbrowser_layout.pm:3105). GTK4's own
 # Label default is .5/.5, so these are not redundant.
@@ -175,6 +176,15 @@ sub Destroy
 	}
 	$self->{widgets}={};
 	$self->{unhandled}={};
+	# the style provider is installed on the display, so it outlives the widget
+	# tree unless it is taken off again
+	if (my $provider=delete $self->{style_provider})
+	{	eval
+		{	my $display=Gtk4::Gdk::Display::get_default() or return;
+			Gtk4::StyleContext::remove_provider_for_display($display,$provider);
+		};
+	}
+	delete $self->{style_rules};
 }
 
 sub _CreateContainer
@@ -596,11 +606,125 @@ sub _ApplyLabelOptions
 	}
 	my $ellipsize=_Ellipsize($values->{ellipsize});
 	$widget->set_ellipsize($ellipsize) if defined $ellipsize;
+	# font=/color= become style classes; a value that cannot be translated, or
+	# a display with no provider at all, leaves the option reported instead
+	my %styled;
+	for my $key (qw/font color/)
+	{	next unless defined $values->{$key};
+		my $method= $key eq 'font' ? '_FontRule' : '_ColorRule';
+		my $class=$self->$method($values->{$key});
+		next unless defined $class;
+		$widget->add_css_class($class);
+		$styled{$key}=1;
+	}
 	my @ignored=grep { !$LabelHandled{$_}
 		|| ($_ eq 'ellipsize' && !defined _Ellipsize($values->{$_}))
+		|| ($_=~m/^(?:font|color)$/ && !$styled{$_})
 		|| ($_=~m/^[xy]align$/ && $values->{$_}!~m/^[0-9]*\.?[0-9]+$/) }
 		@{$node->{options}{order}};
 	$self->{unhandled}{$node->{name}}=\@ignored if @ignored;
+}
+
+# GTK4 moved the per-widget font and colour overrides Layout::Label used
+# (modify_font and override_color, gmusicbrowser_layout.pm:3119-3122) to CSS, so
+# both options become a style class on a provider shared by the whole renderer.
+# See D031.
+#
+# The provider is installed on the display, which is what GTK4 offers: there is
+# no per-widget override left. It is created on first use so a renderer that
+# needs neither option touches no global state, and the class names are derived
+# from the value so two widgets asking for the same font or colour share one
+# rule rather than accumulating duplicates.
+sub _StyleProvider
+{	my $self=shift;
+	return $self->{style_provider} if $self->{style_provider};
+	my $provider=eval { Gtk4::CssProvider->new } or return undef;
+	# add_provider_for_display is the GTK4 replacement for the removed
+	# gtk_style_context_add_provider_for_screen
+	my $display=eval { Gtk4::Gdk::Display::get_default() } or return undef;
+	eval { Gtk4::StyleContext::add_provider_for_display($display,$provider,800); 1 }
+		or return undef;
+	$self->{style_rules}={};
+	return $self->{style_provider}=$provider;
+}
+
+# Reload the shared provider with every rule collected so far. load_from_data
+# needs the byte length as a second argument through this binding.
+sub _StyleRule
+{	my ($self,$class,$body)=@_;
+	my $provider=$self->_StyleProvider or return undef;
+	return $class if $self->{style_rules}{$class};
+	$self->{style_rules}{$class}=$body;
+	# the trailing semicolon matters: without it GTK's parser warns
+	# "Expected ';' at end of block" for every rule
+	my $css=join '', map {".$_ { $self->{style_rules}{$_}; }\n"}
+		sort keys %{$self->{style_rules}};
+	eval { $provider->load_from_data($css,length $css); 1 } or return undef;
+	return $class;
+}
+
+# The point size the bundled layouts were authored against. It is the GTK3
+# default on the reference host, verified rather than assumed: GTK3 and GTK4
+# both report 'Roboto 10' here and an unstyled label measures 19x17 in each.
+# The ratio is fixed against this rather than against the live theme size,
+# because dividing by the live size cancels out - 20/16 of a 16pt theme is
+# 20pt again - which reproduces the absolute legacy size and stops the desktop
+# font reaching the widget. See D031.
+use constant LEGACY_FONT_BASELINE => 10;
+
+# A legacy font= is an absolute Pango size. Emitting it as absolute points
+# would pin the text and override the user's font preference, so it becomes a
+# percentage of whatever the theme font is: font=20 is always 200%, so it stays
+# twice the surrounding text on a 10pt desktop and on a 16pt one. Identical to
+# GTK3 on a baseline desktop; a deliberate parity exception elsewhere.
+sub _FontRule
+{	my ($self,$value)=@_;
+	return undef unless defined $value && $value=~m/^\s*(.*?)\s*$/ && length $1;
+	my $spec=$1;
+	# only the size is translated: a family or weight named in the legacy
+	# string would override the theme's own, which is what this avoids
+	my ($size)= $spec=~m/([0-9]+(?:\.[0-9]+)?)\s*$/;
+	return undef unless $size && $size>0;
+	my $percent= int(100*$size/LEGACY_FONT_BASELINE+.5);
+	return undef if $percent<=0;
+	my $class="gmb-font-$percent";
+	return $self->_StyleRule($class,"font-size: $percent%");
+}
+
+# Greys are the legacy way of asking for de-emphasised text, and every bundled
+# use is one. GTK4 expresses that with the dim-label style class, which follows
+# the theme and its dark variant instead of pinning a shade, so a grey maps onto
+# it. Any other colour is emitted as written, since the layout is asking for
+# that specific colour rather than for de-emphasis.
+my %Greys= map {$_=>1} qw/grey gray darkgrey darkgray dimgrey dimgray
+	lightgrey lightgray silver/;
+
+sub _ColorRule
+{	my ($self,$value)=@_;
+	return undef unless defined $value && $value=~m/^\s*(.*?)\s*$/ && length $1;
+	my $color=$1;
+	# dim-label ships with GTK4, so unlike a generated rule it needs no
+	# provider and is available even where one cannot be installed
+	return 'dim-label' if _IsGrey($color);
+	# a value CSS cannot parse would poison the whole provider, since one bad
+	# rule makes GTK drop the sheet, so only known-safe spellings are emitted
+	return undef unless $color=~m/^#[0-9a-fA-F]{3}$|^#[0-9a-fA-F]{6}$|^[a-zA-Z]+$/;
+	my $class='gmb-color-'.(lc($color)=~s/[^a-z0-9]+//gr);
+	return $self->_StyleRule($class,"color: $color");
+}
+
+# A grey is either a named grey or a hex value whose channels are equal, which
+# is how '#ccc' and '#888888' in a layout spell the same intent.
+sub _IsGrey
+{	my $color=lc shift;
+	return 1 if $Greys{$color};
+	if (my ($r,$g,$b)= $color=~m/^#([0-9a-f])([0-9a-f])([0-9a-f])$/)
+	{	return $r eq $g && $g eq $b;
+	}
+	if (my ($r,$g,$b)= $color=~m/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/)
+	{	return $r eq $g && $g eq $b;
+	}
+	return 0;
 }
 
 # The Pango mode a legacy ellipsize= asks for, or undef if it names none. '1' is

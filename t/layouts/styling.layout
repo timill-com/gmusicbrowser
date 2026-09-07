@@ -1,0 +1,5 @@
+[gtk4 styling]
+Type=G
+VBroot= HBfont HBcolor
+HBfont= Text(text="Wg") Text2(text="Wg",font=20) Text3(text="Wg",font=8) Text4(text="Wg",font=oops)
+HBcolor= Label(text="Wg") Label2(text="Wg",color=grey) Label3(text="Wg",color=white) Label4(text="Wg",color=notacolour!)
