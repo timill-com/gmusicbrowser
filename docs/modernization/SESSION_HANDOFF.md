@@ -1,9 +1,13 @@
 # Session handoff
 
-Status: `HEAD` is `a315171` "docs: record D027, and correct the ToggleButton
-recommendation". The tree is clean. One increment landed this session: the
-legacy `size=`/`relief=` button options, recorded as **D027**, plus the
-correction of the previous handoff's `ToggleButton` recommendation.
+Status: the tree is clean. Two increments landed this session, both closing
+default-level correctness gaps in already-rendered widgets:
+
+1. The legacy `size=`/`relief=` button options, recorded as **D027**.
+2. The legacy `Layout::Label` `xalign`/`yalign`/`ellipsize` options, recorded
+   as **D028**.
+
+Plus the correction of the previous handoff's `ToggleButton` recommendation.
 
 Last session: 2026-09-07. Branch `gtk4-alpha`.
 
@@ -62,9 +66,10 @@ otherwise from the size of the planning documents.
 
 ## What is committed and what is not
 
-Everything is committed. `HEAD` is `a315171` and `gtk4-alpha` is twelve commits
-past `master`:
+Everything is committed. `gtk4-alpha` is fourteen commits past `master`:
 
+	58d7cb3 gtk4: apply the legacy label alignment and ellipsize options
+	20f676f docs: record the landed commits in the handoff
 	a315171 docs: record D027, and correct the ToggleButton recommendation
 	54b0a8f gtk4: apply the legacy button size and relief options
 	0074c06 docs: record the session's landed commits in the handoff
@@ -79,22 +84,20 @@ past `master`:
 	d4c87d0 agents file
 	774aa2e initial plan
 
-The `size=`/`relief=` increment touched five files and nothing else:
-
-	gmusicbrowser_gtk4_layout.pm
-	t/04_Gtk4LayoutRenderer.t
-	t/gtk4/40_Icons.t
-	t/layouts/buttons.layout
-	t/layouts/icons.layout
-
-with the documentation changes committed separately.
+Neither increment touched shared code. The `size=`/`relief=` one changed
+`gmusicbrowser_gtk4_layout.pm`, `t/04_Gtk4LayoutRenderer.t`,
+`t/gtk4/40_Icons.t`, `t/layouts/buttons.layout`, and `t/layouts/icons.layout`;
+the label one changed `gmusicbrowser_gtk4_layout.pm`,
+`t/04_Gtk4LayoutRenderer.t`, `t/gtk4/30_Box.t`, and added
+`t/layouts/labels.layout`. Documentation is committed separately from code in
+both cases.
 
 No GTK3 production code, bundled layout, or file in `pix/` has been touched by
 any increment on this branch. `gmusicbrowser.pl` is unmodified. No file has been
 added this session; the earlier ones added `tools/run-gtk3-smoke`,
 `t/RendererLabels.pm`, `t/layouts/sizing.layout`, and `t/layouts/align.layout`.
 
-## This session: the legacy `size=` and `relief=` button options
+## This session, first increment: the legacy `size=` and `relief=` button options
 
 The increment closes a correctness gap in the same class as `minwidth=` before
 it: `Layout::Button` sets `relief => 'none'` and `size => SIZE_BUTTONS` in
@@ -190,6 +193,79 @@ GTK4's real default.
 - No shared code changed. Only `gmusicbrowser_gtk4_layout.pm`, the two test
   files, and the two fixtures. `make test-gtk3` was run anyway and passes.
 
+## This session, second increment: label alignment and ellipsize
+
+Same shape as the first: a legacy `@default_options` value the renderer never
+applied, so every widget it had already built was wrong by default.
+`Layout::Label` sets `xalign => 0, yalign => .5`
+(`gmusicbrowser_layout.pm:3105`) but **`Gtk4::Label` defaults to `xalign=0.5`**,
+so every `Label` and `Text` was centred where GTK3 left-aligns it. Recorded as
+**D028**, status **Proposed**.
+
+Unlike the icon-size case, both translations here are trivial *and* lossless:
+
+- GTK4 split the deprecated `Gtk3::Label::set_alignment` into
+  `set_xalign`/`set_yalign`, which take the same float. Measured: 0.25 reads
+  back as 0.25 in both toolkits. **This is the contrast with D025** — `AB`
+  loses a fractional alignment to a three-valued `halign` enum, but a label's
+  alignment is a float property in both toolkits.
+- `ellipsize` is the same Pango enum in both, passed through unchanged.
+
+Two values are filtered because an out-of-range enum is **fatal** through this
+binding, and both stay reported through `Unhandled`:
+
+- `ellipsize` outside the four Pango modes. Note `Layout::Button` maps `'1'` to
+  `'end'` (`:3051`) but `Layout::Label` deliberately does **not**, so
+  `ellipsize=1` on a label does not ellipsize in GTK3 either. The asymmetry is
+  real and is preserved rather than tidied away.
+- A non-numeric `xalign`/`yalign`. GTK3 accepts it with a Perl
+  `isn't numeric` warning and coerces it to 0 — verified, not assumed — and
+  since the legacy `xalign` default is also 0, falling back to the default
+  reaches the same rendering.
+
+`markup` (76 uses), `font`, `color`, and `minsize`/`expand_max` are deliberately
+out of scope; see D028 alternative 3.
+
+### Two of the new assertions were vacuous, and pristine caught it
+
+This is the most transferable part of the increment. Both fixes were in the
+fixture, not the test.
+
+- **Four *centred* labels with differing text render at 186, 190, 188, and
+  187.** The offsets already differ from text width alone, so an `isnt` or an
+  ordering comparison passes against a renderer that ignores alignment
+  entirely. Every alignment label in the fixture now carries identical text, so
+  only the alignment can move the offset.
+- **An un-ellipsized minimum width tracks the text**, so comparing
+  `ellipsize=end` on one string against `ellipsize=none` on a different string
+  measures the strings. Both labels now carry the same string; the ellipsized
+  minimum is 9px against the full text width.
+
+The lesson is the same one the `measure()`-above-16px trap taught in the first
+increment, and it is worth stating generally: **run each new physical assertion
+against pristine individually.** A file-level failure count hides an assertion
+that fails for the wrong reason, and hides one that passes for the wrong reason
+entirely.
+
+### The right observable for a label's alignment
+
+`Label->get_layout_offsets` returns where the text actually lands.
+`translate_coordinates` cannot see a label's alignment, because the label widget
+*is* the full slot — the alignment moves the text inside it. This is the
+opposite of the `AB` case in the same test file, where the child widget moves
+within the slot and `translate_coordinates` is exactly right.
+
+### Verification for this increment
+
+- `t/gtk4/30_Box.t` fails **7 of 78** against pristine on real Wayland.
+- `t/04_Gtk4LayoutRenderer.t` fails **10 of 177** offline against pristine.
+- Controls pass on both trees: the slot-width sanity check, the out-of-range
+  ellipsize being left at the default, and `a Label with no xalign renders
+  where xalign=0 does` — which legitimately matches on both trees, centred on
+  pristine and left-aligned now, and is what pairs with the `far from centred`
+  assertion to discriminate.
+- No shared code changed. `make test-gtk3` was run anyway and passes.
+
 ## Renderer widget state
 
 Widget elements implemented: `Label`, `Text`, `Play`, `Quit`, `Stop`, `Next`,
@@ -214,6 +290,18 @@ matching GTK3, not framed theme-sized ones. See D027. `%ButtonHandled` now
 covers `icon`, `stock`, `text`, `tip`, `size`, and `relief`; what remains
 reported through `Unhandled` is `nbsongs`, `group`, `button=0`, and a `size=`
 value outside the mapping.
+
+`Label` and `Text` likewise get the legacy `Layout::Label` defaults, so they
+are left-aligned rather than centred, and `xalign`/`yalign`/`ellipsize` are
+applied. See D028. `%LabelHandled` covers `text`, `xalign`, `yalign`,
+`ellipsize`, `minwidth`, and `minheight`; `markup`, `font`, `color`, `minsize`,
+and `expand_max` stay reported.
+
+Both increments follow the same pattern, and it is worth looking for more of
+it: a legacy `@default_options` value whose GTK4 counterpart differs is a
+silent, whole-class correctness bug. `%ButtonDefaults` and `%LabelDefaults` are
+the two found so far. Any future widget class should have its
+`@default_options` read before its options are, not after.
 
 `minwidth=`/`minheight=` now reach every widget and container, through
 `_ApplyCommonOptions`, which is the legacy `ApplyCommonOptions` size request
@@ -670,17 +758,17 @@ Commands that were actually run and passed this session:
 	make test-gtk3
 	git diff --check
 
-`make test-modernization`: **325** executed assertions passed, no skips.
+`make test-modernization`: **342** executed assertions passed, no skips.
 Running totals: 269 two sessions ago, 298 after `Next`/`Prev`, 315 after
-`Filler`, 317 after the labels fixture, 325 after `size=`/`relief=`. The skip
-count was read from `prove -v`, not assumed.
+`Filler`, 317 after the labels fixture, 325 after `size=`/`relief=`, 342 after
+label alignment. The skip count was read from `prove -v`, not assumed.
 
-`make test-gtk4` on the real Wayland connection: **246** TAP results,
-comprising **240 executed assertions passed** and the same six pre-existing M1
+`make test-gtk4` on the real Wayland connection: **258** TAP results,
+comprising **252 executed assertions passed** and the same six pre-existing M1
 feasibility probes skipped, 0 failures. Per file: 18 binding (which is where
-all six skips live), 4 proof-of-life, 84 pane, 66 box, 74 icon. Running totals
+all six skips live), 4 proof-of-life, 84 pane, 78 box, 74 icon. Running totals
 for the same command: 173 before `Next`/`Prev`, 184 after it, 202 after
-`Filler`, 216 after the `AB` coverage, 246 now. Do not restate this as 246
+`Filler`, 216 after the `AB` coverage, 246 after `size=`/`relief=`, 258 now. Do not restate this as 246
 passing assertions. The six skips were counted by copying the runner to
 `tools/.verbose-smoke-tmp`, switching `prove` to `-v`, and grepping
 `^ok [0-9]+ # skip` — six matches, all `BLOCKED:` M1 probes in
@@ -848,13 +936,18 @@ means the reported ~1190px window is not the layout's designed size.
 
 ## Suggested next steps
 
-1. **Decide D027**, which this session wrote as **Proposed**. It is the
-   narrowest of the open decisions: the translation is lossless and measured
-   in both toolkits, so the question is only whether `set_has_frame` versus
-   `add_css_class('flat')` is the right relief route (alternative 3). Every
-   button row is blocked behind it, because until it is accepted the renderer's
-   button sizing is an unaccepted approximation on paper even though it is
-   exact in fact.
+1. **Decide D027 and D028**, both written this session as **Proposed**. They
+   are the narrowest of the open decisions: both translations are lossless and
+   measured in both toolkits, so the only real questions are D027's
+   alternative 3 (`set_has_frame` versus `add_css_class('flat')`) and D028's
+   alternative 2 (whether to preserve the `Layout::Button`/`Layout::Label`
+   `ellipsize=1` asymmetry, which the implementation currently does). Every
+   button and label row is blocked behind them, because until they are accepted
+   the sizing and alignment are unaccepted approximations on paper even though
+   both are exact in fact.
+   There are now **six** Proposed entries — D023, D024, D025, D026, D027,
+   D028 — and every one of them gates a row. That backlog is the main thing
+   stopping the parity checklist from moving, not missing implementation.
 2. Next widget candidates. **Do not take `ToggleButton` as a button
    increment** — see the section at the top of this file for why the previous
    recommendation was wrong. Corrected reading:
@@ -937,6 +1030,24 @@ means the reported ~1190px window is not the layout's designed size.
   no display, so `_IconTheme` returns undef, `_IconName` returns early, and no
   icon resolves at all — every button falls back to a text label with no image.
   Icon-size assertions belong in `t/gtk4/40_Icons.t`.
+- **`Label->get_layout_offsets` is the only observable for a label's
+  alignment.** `translate_coordinates` cannot see it: the label widget *is* the
+  full slot, and the alignment moves the text inside it. This is the opposite of
+  the `AB` case in the same test file, where the child widget moves within the
+  slot and `translate_coordinates` is exactly right.
+- **Labels being compared for alignment must carry identical text.** Four
+  *centred* labels with differing text render at offsets 186, 190, 188, 187 —
+  they differ from text width alone, so an ordering or `isnt` comparison passes
+  against a renderer that ignores alignment entirely.
+- **Labels being compared for `ellipsize` must also carry identical text.** An
+  un-ellipsized minimum width tracks the text, so two different strings measure
+  the strings rather than the option.
+- **Floating-point properties print in the current locale.** A GTK3 probe under
+  this host's locale reported `xalign=0,5` with a comma and made
+  `set_alignment` look broken. Run numeric probes under `LC_ALL=C`.
+- `Gtk4::Label` defaults to `xalign=0.5`, so the legacy `xalign => 0` default is
+  a real behaviour difference, not a no-op. `set_xalign`/`set_yalign` accept
+  fractional values exactly in both toolkits, so unlike `AB` nothing is bucketed.
 - **A `measure()` check on an icon only discriminates above 16px,** because
   GTK4's default icon size is 16. `size=menu`, `size=button`, and
   `size=small-toolbar` measure correctly even against a renderer that ignores

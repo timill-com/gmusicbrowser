@@ -42,6 +42,7 @@ surface. Numeric suffixes retain the base element's behaviour.
 | `minwidth=`/`minheight=` on any widget or container | GTK4 in progress |
 | Icon options (`icon=`, `stock=`) on the above | GTK4 in progress, see D023 |
 | `size=`/`relief=` on any button | GTK4 in progress, see D027 |
+| `xalign=`/`yalign=`/`ellipsize=` on `Label`/`Text` | GTK4 in progress, see D028 |
 | `tip=` tooltip option on the above | GTK4 in progress, literal tips only |
 | `AABox`, `AASearch`, `AddLabelEntry`, `Album`, `AlbumBox`, `AlbumSearch`, `Artist`, `ArtistBox`, `ArtistPic`, `ArtistSearch`, `BContext`, `Button`, `Choose`, `ChooseRandAlbum`, `Comment`, `Connections`, `Context`, `Cover`, `Date`, `EditList`, `EditListButtons`, `EmptyList`, `Equalizer`, `EqualizerPresets`, `EqualizerPresetsSimple`, `EventBox`, `FBox`, `FLock`, `FPane`, `Filter`, `FilterBox`, `FilterLock`, `FilterPane`, `Fullscreen`, `HSeparator`, `HistItem`, `LSortItem`, `LabelTime`, `LabelToggleButtons`, `LabelVol`, `LabelsIcons`, `LayoutItem`, `Length`, `Lock`, `LockAlbum`, `LockArtist`, `LockSong`, `MainMenuItem`, `MenuItem`, `OpenBrowser`, `OpenContext`, `OpenQueue`, `PFilterItem`, `PSortItem`, `PictureBrowser`, `PlayFilter`, `PlayItem`, `PlayList`, `PlayOrderCombo`, `PlayingTime`, `Pos`, `Pref`, `Progress`, `ProgressV`, `Queue`, `QueueActions`, `QueueFilter`, `QueueItem`, `QueueList`, `Refresh`, `Repeat`, `ResetFilter`, `Scale`, `SeparatorMenuItem`, `ShuffleList`, `SimpleSearch`, `SongInfo`, `SongList`, `SongSearch`, `SongTree`, `Sort`, `Stars`, `TabbedLists`, `Time`, `TimeBar`, `TimeSlider`, `Title`, `Title_by`, `TogButton`, `ToggleButton`, `Total`, `VProgress`, `VSeparator`, `Visuals`, `Vol`, `VolBar`, `VolSlider`, `Volume`, `VolumeBar`, `VolumeIcon`, `VolumeSlider`, `Year` | Not started |
 
@@ -170,6 +171,35 @@ means porting the layout show/hide subsystem first, which is a much larger unit
 than a `%Buttons` entry and is not a button increment at all. It reuses
 `%Buttons` and `_CreateButton` only for its icon, size, and relief — the parts
 D027 now covers.
+
+`Label` and `Text` now apply the legacy `Layout::Label` presentation options,
+as **D028** (status **Proposed**). `@default_options` is
+`xalign => 0, yalign => .5` (`gmusicbrowser_layout.pm:3105`) while GTK4's own
+`Gtk4::Label` default is `.5`, so until this increment every `Label` and `Text`
+the renderer built was centred where GTK3 left-aligns it. GTK4 split the
+deprecated `set_alignment` into `set_xalign`/`set_yalign`, which take the same
+fractional value, so this translation is **lossless** — the contrast with D025,
+where `AB` loses a fractional alignment to a three-valued enum. `ellipsize` is
+the same Pango enum in both toolkits and passes through unchanged.
+
+Two values are filtered because an out-of-range enum is fatal through this
+binding: an `ellipsize` outside `none`/`start`/`middle`/`end`, and a
+non-numeric `xalign`/`yalign`, which falls back to the legacy default as GTK3's
+own coercion does. Both stay reported through `Unhandled`.
+
+Still unhandled for labels: `markup` (**76** uses), which needs `::UsedFields`
+and per-song substitution; `font` and `color`, which GTK4 moved from widget
+overrides to CSS; and `minsize`/`expand_max`, which drive the legacy
+scrolling-label machinery. Each belongs with a real `Layout::Label` port.
+Counting `markup` needs the same care as the widget counts: the bundled layouts
+also carry 24 `lmarkup=`, 11 `mmarkup=`, 2 `markup_empty=`, and 2
+`init_markup=`, and a bare `grep -o 'markup='` reports 113 by matching inside
+the first three. A `[(,]markup=` filter undercounts at 74 because two uses
+start a continuation line.
+The `Layout::Label` family is `Text`, `Pos`, `Title`, `Title_by`, `Artist`,
+`Album`, `Year`, `Comment`, `Length`, `PlayingTime`, `Volume`, `Visuals`, and
+`LabelToggleButtons`, with `Label` an alias for `Text`; only `Text`/`Label` is
+implemented.
 
 `Filler` is the legacy `Gtk3::HBox->new`, so GTK4 builds it as an empty
 `Gtk4::Box`. It carries no options in any bundled layout: all 102 instances are

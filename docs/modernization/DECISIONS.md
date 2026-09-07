@@ -164,6 +164,14 @@ Evidence recorded so far, against the system
   `set_has_frame`/`get_has_frame` are present; `get_has_frame` returns `1` and
   the empty string rather than `1`/`0`, so compare it loosely or against `''`.
   `add_css_class('flat')` also works and `get_css_classes` reads it back.
+- `Label->set_xalign`/`set_yalign` accept and return fractional values exactly
+  (0.25 reads back 0.25), and so does the GTK3 `set_alignment` they replace.
+  `Label->get_layout_offsets` returns the rendered text position, which is the
+  only way to show a label's alignment actually took effect — the widget itself
+  fills its slot, so `translate_coordinates` cannot see it.
+- **Floating-point properties are formatted in the current locale.** A GTK3
+  probe under this host's locale printed `xalign=0,5` with a comma and made
+  `set_alignment` look broken. Run numeric probes under `LC_ALL=C`.
 
 ## D007 — Canonical application ID
 
@@ -835,6 +843,105 @@ discriminates above 16px, because GTK4's own default icon size is 16. The
 renderer that ignores `size=` entirely, so `get_pixel_size` is what actually
 pins those three. This is the same class of trap as the recorded
 `set_size_request` one in D006.
+
+## D028 — `Layout::Label` alignment and ellipsize port unchanged
+
+Status: **Proposed**
+
+Gate: before any `Layout::Label` row is advanced past `GTK4 in progress`
+
+Context:
+
+`Layout::Label` sets `xalign => 0, yalign => .5` in `@default_options`
+(`gmusicbrowser_layout.pm:3105`) and applies them through
+`Gtk3::Label::set_alignment`, which GTK3 deprecated in 3.14. `ellipsize` is
+passed straight to `Gtk3::Label::set_ellipsize` (`:3127`).
+
+Measured through the system binding on GTK 4.14.5 and GTK 3.24.41:
+
+- **`Gtk4::Label` defaults to `xalign=0.5`**, not 0. So a `Label` or `Text`
+  built without applying the legacy default is centred where GTK3
+  left-aligns it. This affected every `Label`/`Text` the renderer had built.
+- `set_xalign`/`set_yalign` accept **fractional values exactly** — 0.25 reads
+  back as 0.25 — and so does the GTK3 `set_alignment` they replace. There is
+  no enum, so nothing is bucketed.
+- `set_ellipsize` accepts the same four Pango names in both toolkits.
+
+Decision:
+
+Apply the legacy `@default_options` and translate `xalign`/`yalign` to
+`set_xalign`/`set_yalign`, and `ellipsize` to `set_ellipsize` unchanged.
+
+Both translations are **lossless**. This is the important contrast with D025:
+`AB` loses a fractional alignment because GTK4's `halign` is a three-valued
+enum, but a label's alignment is a float property in both toolkits, so the
+same fractional value that GTK3 accepted is preserved.
+
+Two values are filtered rather than passed on, because an out-of-range value
+is a **fatal** enum error through this binding rather than a warning:
+
+- An `ellipsize` outside `none`/`start`/`middle`/`end`. Note
+  `Layout::Button` maps `'1'` to `'end'` (`:3051`) but `Layout::Label`
+  deliberately does not, so `ellipsize=1` on a label is not silently
+  upgraded.
+- A non-numeric `xalign`/`yalign`. GTK3 accepts it with a Perl
+  `isn't numeric` warning and coerces it to 0, which is verified, not
+  assumed; since the legacy `xalign` default is also 0 the renderer falls back
+  to the default and reaches the same rendering.
+
+Both keep being reported through `Unhandled`, so nothing is silently accepted.
+
+Alternatives:
+
+1. Map `xalign`/`yalign` onto `halign`/`valign` as the `AB` container does.
+   Rejected: it would bucket a value the label can represent exactly, and
+   `halign` positions the whole widget in its parent rather than the text
+   inside the widget, which is a different effect.
+2. Follow `Layout::Button` and map `ellipsize=1` to `end`. Rejected: it would
+   change behaviour relative to GTK3, where a label with `ellipsize=1` does
+   not ellipsize. The asymmetry between the two legacy classes is real and is
+   preserved.
+3. Also port `markup` (76 uses), `font`, `color`, and `minsize`. Deferred, not
+   rejected. `markup` runs through `::UsedFields` and per-song substitution,
+   `font` and `color` moved from widget overrides to CSS in GTK4, and
+   `minsize`/`expand_max` drive the legacy scrolling-label machinery. Each is
+   a larger unit than a presentation property and belongs with a real
+   `Layout::Label` port.
+
+Consequences:
+
+`Label` and `Text` now render their text where GTK3 renders it. No
+layout-visible option name changes, so the D002 compatibility surface is
+untouched, and nothing about the text itself changes — this stays inside D013
+on the same ground as D023, D024, and D027: it applies a default GTK4 does not
+share and replaces a deprecated setter.
+
+The `Layout::Label` family is `Text`, `Pos`, `Title`, `Title_by`, `Artist`,
+`Album`, `Year`, `Comment`, `Length`, `PlayingTime`, `Volume`, `Visuals`, and
+`LabelToggleButtons`, with `Label` an alias for `Text`. Only `Text`/`Label` is
+implemented, so this decision currently reaches two elements, but the option
+handling is where the rest of the family will land.
+
+Evidence or removal condition:
+
+`t/gtk4/30_Box.t` asserts the rendered text position through
+`get_layout_offsets` for `xalign` 0, .5, and 1, that the no-option default
+renders where `xalign=0` does and far from centred, and that `ellipsize=end`
+lowers the label's minimum width. `t/04_Gtk4LayoutRenderer.t` covers the
+fractional values, the defaults, and both filtered cases. Run against the
+previous renderer, `t/gtk4/30_Box.t` fails 7 of 78 and
+`t/04_Gtk4LayoutRenderer.t` fails 10 of 177.
+
+Two things that make these assertions non-vacuous, both found by running them
+against pristine:
+
+- **Every alignment label must carry identical text.** With differing text the
+  centred offsets already differ by a few pixels on their own (measured 186,
+  190, 188, 187 for four centred labels), so an `isnt` or ordering comparison
+  passes against a renderer that ignores alignment entirely.
+- **The two ellipsize labels must carry identical text** for the same reason:
+  an un-ellipsized minimum tracks the text width, so comparing two different
+  strings measures the strings rather than the option.
 
 ## Decision template
 

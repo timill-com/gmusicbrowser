@@ -10,10 +10,10 @@ make test-modernization
 
 This runs the neutral layout parser, frontend contract and lifecycle, legacy
 adapter and lifecycle integration, and GTK4 renderer contract tests. On
-2026-09-07 it reported 325 executed assertions passed and no skips. Running
+2026-09-07 it reported 342 executed assertions passed and no skips. Running
 totals: 269 at the start of the previous session, 298 after `Next`/`Prev`, 315
 after `Filler`, 317 after the shared labels fixture, 325 after the
-`size=`/`relief=` increment. The
+`size=`/`relief=` increment, 342 after label alignment/ellipsize. The
 renderer test uses small in-process GTK doubles; it proves the
 parser/renderer/command wiring without claiming that a real GTK4 binding or
 display passed.
@@ -70,15 +70,16 @@ and [max-position property](https://docs.gtk.org/gtk4/property.Paned.max-positio
 The action test uses [cycle-handle-focus](https://docs.gtk.org/gtk4/signal.Paned.cycle-handle-focus.html)
 before [move-handle](https://docs.gtk.org/gtk4/signal.Paned.move-handle.html).
 
-`t/gtk4/30_Box.t` adds real `HB`/`VB` packing geometry to the runner. On
-2026-09-07, after the `size=`/`relief=` increment, the full
-`make test-gtk4` run reported 246 TAP results: 240 executed assertions passed
+`t/gtk4/30_Box.t` adds real `HB`/`VB` packing geometry to the runner, plus the
+`AB` and label alignment coverage. On 2026-09-07, after the label
+alignment/ellipsize increment, the full
+`make test-gtk4` run reported 258 TAP results: 252 executed assertions passed
 and the same six feasibility probes were skipped, 0 failures. The skips were
 counted from `prove -v` and are the same six M1 probes as before. Running
 totals for the same command: 173 results before `Next`/`Prev`, 184 after it,
 202 after `Filler`, 216 after the `AB` alignment coverage, 246 after
-`size=`/`relief=`. Per file: 18 binding, which is where all six skips live,
-4 proof-of-life, 84 pane, 66 box, 74 icon.
+`size=`/`relief=`, 258 after label alignment. Per file: 18 binding, which is
+where all six skips live, 4 proof-of-life, 84 pane, 78 box, 74 icon.
 They read allocated child offsets with
 [translate_coordinates](https://docs.gtk.org/gtk4/method.Widget.translate_coordinates.html);
 `compute_bounds` and `compute_point` are unusable through this binding, which
@@ -311,6 +312,27 @@ cases pass on both trees. On pristine, `relief=normal keeps the frame`, the six
 unknown size= is still reported as unhandled`, and `a real widget reports the
 options it ignored` all pass, because the old renderer's GTK4 defaults happen
 to be framed and unsized and it reported `size`/`relief` as unhandled.
+
+The label alignment and ellipsize assertions for D028 are rendering, not
+property read-back. `Label->get_layout_offsets` returns where the text actually
+lands; the widget itself fills its slot, so `translate_coordinates` cannot see a
+label's alignment. Proved the same way: `t/gtk4/30_Box.t` fails **7 of 78** on
+real Wayland and `t/04_Gtk4LayoutRenderer.t` fails **10 of 177** offline against
+a pristine archive with only the tests and the new fixture overlaid.
+
+**Two of those assertions were vacuous on the first attempt, and running them
+against pristine is what caught it.** Both fixes are in the fixture, not the
+test:
+
+- **Every alignment label must carry identical text.** Four *centred* labels
+  with differing text render at offsets 186, 190, 188, and 187 — they already
+  differ by a few pixels from the text width alone, so an `isnt` or an ordering
+  comparison passes against a renderer that ignores alignment entirely. With
+  identical text the only thing that can move the offset is the alignment.
+- **The two ellipsize labels must carry identical text.** An un-ellipsized
+  minimum width tracks the text, so comparing two different strings measures the
+  strings. With the same string, `ellipsize=end` measures a 9px minimum against
+  the un-ellipsized string's full width.
 
 **A `measure()` check on an icon only discriminates above 16px.** GTK4's own
 default icon size is 16, so the `menu`, `button`, and `small-toolbar` rows
