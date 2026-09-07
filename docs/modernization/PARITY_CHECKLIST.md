@@ -39,21 +39,52 @@ surface. Numeric suffixes retain the base element's behaviour.
 | Elements | GTK4 status |
 |---|---|
 | `Label`, `Play`, `Quit` | GTK4 in progress |
+| Icon options (`icon=`, `stock=`) on the above | GTK4 in progress, see D023 |
 | `AABox`, `AASearch`, `AddLabelEntry`, `Album`, `AlbumBox`, `AlbumSearch`, `Artist`, `ArtistBox`, `ArtistPic`, `ArtistSearch`, `BContext`, `Button`, `Choose`, `ChooseRandAlbum`, `Comment`, `Connections`, `Context`, `Cover`, `Date`, `EditList`, `EditListButtons`, `EmptyList`, `Equalizer`, `EqualizerPresets`, `EqualizerPresetsSimple`, `EventBox`, `FBox`, `FLock`, `FPane`, `Filler`, `Filter`, `FilterBox`, `FilterLock`, `FilterPane`, `Fullscreen`, `HSeparator`, `HistItem`, `LSortItem`, `LabelTime`, `LabelToggleButtons`, `LabelVol`, `LabelsIcons`, `LayoutItem`, `Length`, `Lock`, `LockAlbum`, `LockArtist`, `LockSong`, `MainMenuItem`, `MenuItem`, `Next`, `OpenBrowser`, `OpenContext`, `OpenQueue`, `PFilterItem`, `PSortItem`, `PictureBrowser`, `PlayFilter`, `PlayItem`, `PlayList`, `PlayOrderCombo`, `PlayingTime`, `Pos`, `Pref`, `Progress`, `ProgressV`, `Queue`, `QueueActions`, `QueueFilter`, `QueueItem`, `QueueList`, `Refresh`, `Repeat`, `ResetFilter`, `Scale`, `SeparatorMenuItem`, `ShuffleList`, `SimpleSearch`, `SongInfo`, `SongList`, `SongSearch`, `SongTree`, `Sort`, `Stars`, `Stop`, `TabbedLists`, `Text`, `Time`, `TimeBar`, `TimeSlider`, `Title`, `Title_by`, `TogButton`, `ToggleButton`, `Total`, `VProgress`, `VSeparator`, `Visuals`, `Vol`, `VolBar`, `VolSlider`, `Volume`, `VolumeBar`, `VolumeIcon`, `VolumeSlider`, `Year` | Not started |
 
 | Container prefix | Legacy meaning | GTK4 status |
 |---|---|---|
 | `HB`, `VB` | Horizontal/vertical packing | GTK4 in progress |
-| `HP`, `VP` | Horizontal/vertical pane | Not started |
+| `HP`, `VP` | Horizontal/vertical pane | GTK4 in progress |
 | `TB`, `NB` | Legacy/current tabbed container | Not started |
 | `MB`, `SM`, `BM` | Menu bar, submenu, button menu | Not started |
-| `EB` | Expander | Not started |
+| `EB` | Expander | GTK4 in progress |
 | `FB` | Fixed-position container | Not started |
-| `FR` | Frame | Not started |
-| `SB` | Scroller | Not started |
-| `AB` | Alignment wrapper | Not started |
-| `WB` | Event wrapper | Not started |
+| `FR` | Frame | GTK4 in progress |
+| `SB` | Scroller | GTK4 in progress |
+| `AB` | Alignment wrapper | GTK4 in progress |
+| `WB` | Event wrapper | GTK4 in progress |
 | `@layout` | Embedded layout | Not started |
+
+The containers marked in progress are built by the GTK4 renderer and covered by
+`t/04_Gtk4LayoutRenderer.t` against in-process doubles. That proves construction,
+option handling, and packing translation only. Pane allocation and saved-size
+checks additionally run in `t/gtk4/20_Paned.t`, and box packing geometry in
+`t/gtk4/30_Box.t`, both on real Wayland. This does not advance any container to
+parity review. `HB`/`VB` translate the legacy packing prefix set (padding
+digits, `_` expand, `-` end packing, `.` fill off). Expand, fill, and padding
+now act on the packing axis, and `-` reproduces `pack_end` far-edge placement,
+with allocated offsets measured against the unchanged GTK3 `BoxPack` on the
+same fixture. Homogeneous boxes, `spacing` beyond the legacy 1, size groups,
+and `expand_max`-style widget options are not covered.
+`HP`/`VP` implement `_` resize, `+` shrink-off, and the `size` option.
+Panes expose the legacy `SaveOptions` callback, recording both sides as `N-M`
+and restoring `N`, `N-M`, or `N_M`. Coalesced position/bounds notifications
+replace `size_allocate`; GTK4 resize properties replace `child_get`. The legacy
+resize policy and constrained-restore retry are retained. The GTK4 proof
+application still has no configuration writer, so this is a renderer-level
+round trip, not persistence across application restarts. Pointer dragging,
+physical keyboard input, focus, and accessibility still need comparison.
+Icon-bearing options are resolved by name through `GtkIconTheme` per D023, with
+the bundled `pix/` directory on the search path. `t/gtk4/40_Icons.t` covers the
+legacy `gtk-*` mapping, bundled icons, alias fallback, and the text fallback for
+an unresolvable name. Only `Play` and `Quit` accept icons so far; the remaining
+99 `icon=` and 17 `stock=` uses in bundled layouts belong to widgets that are
+not implemented yet. Icon artwork is unchanged, so this stays inside D013.
+
+`AB` and `WB` have no direct GTK4 equivalent: `AB` becomes alignment properties
+on its child and `WB` becomes a
+plain box, both pending an accepted decision entry.
 
 Parser compatibility items are inheritance, empty overrides, continuation
 lines, translations, ordered packing prefixes, quoted and nested options,

@@ -1,0 +1,3 @@
+[gtk4 icons]
+Type=G
+VBroot= Play(icon=gtk-media-play) Quit(stock=gtk-quit) Play2(icon=gmb-random) Quit2(icon=gmb-queue0) Play3(icon=no-such-icon-name) Quit3

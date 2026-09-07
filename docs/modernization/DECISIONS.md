@@ -416,6 +416,64 @@ turning optional shell-specific integrations into dependencies. It also allows
 the project to provide a richer Plasma experience while respecting stock GNOME
 and the integration Ubuntu already supplies.
 
+## D023 — GTK4 icons use themed icon names, not a stock factory
+
+Status: **Proposed**
+
+Gate: before the GTK4 renderer grows icon-bearing widgets
+
+Context:
+
+GTK3 registers the 28 bundled `gmb-*` images through `Gtk3::IconFactory`
+(`gmusicbrowser.pl:1579`) and resolves the rest by icon name through
+`Gtk3::IconTheme`. Layouts name icons in widget options, for example
+`ToggleButton3(icon=gmb-picture)` and `Fullscreen(stock=gmb-view-fullscreen)`,
+so those names are part of the layout compatibility surface (D002).
+`GtkIconFactory`, `GtkIconSet`, and the whole stock-item system were removed in
+GTK4.
+
+Decision:
+
+The GTK4 frontend resolves every icon by name through `GtkIconTheme` and sets
+it on widgets with `set_icon_name` / `Gtk4::Image->new_from_icon_name`. The
+bundled `pix/` directory is added to the icon theme search path so the existing
+`gmb-*` names keep resolving. No stock-item replacement is introduced, and the
+`gmb-*` names are retained rather than renamed.
+
+Verified on 2026-09-07 against GTK 4.14.5 through the system binding:
+
+- `Gtk4::IconTheme::get_for_display`, `add_search_path`, and `has_icon` work.
+- `has_icon('gmb-random')` is false with the stock search path and true after
+  adding `pix/`, so the flat directory resolves without a themed
+  `index.theme` hierarchy and without moving any file.
+- `Button->set_icon_name`, `Button->new_from_icon_name`, and
+  `Image->new_from_icon_name` all work.
+- `Image->new_from_file` and `Gdk::Texture->new_from_filename` work as an
+  explicit-path fallback for layout options that give a file rather than a name.
+
+Alternatives:
+
+1. Reorganize `pix/` into a themed hierarchy. Rejected as unnecessary: GTK4
+   already resolves the flat directory, and moving the files would churn
+   packaging for no functional gain.
+2. Replace the `gmb-*` names with freedesktop equivalents. Deferred: that is a
+   presentation change to a layout-visible name, which D013 postpones until
+   after the parity release. Where a legacy name has an obvious standard
+   equivalent, the mapping can be proposed separately.
+
+Consequences:
+
+Icon-bearing widget options (`icon=`, `stock=`) keep working unchanged in GTK4
+layouts. Presentation is unchanged, so this stays inside D013: it replaces
+removed infrastructure rather than restyling the interface. Any actual visual
+refresh of the `gmb-*` artwork is a separate proposal after parity.
+
+Evidence or removal condition:
+
+Covered by renderer tests once icon-bearing widgets exist. Revisit if a bundled
+icon fails to resolve on a supported desktop, or if packaging cannot ship
+`pix/` on the icon search path.
+
 ## Decision template
 
 Copy this section for new decisions:

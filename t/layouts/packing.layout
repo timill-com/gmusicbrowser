@@ -1,0 +1,6 @@
+[gtk4 packing]
+Type=G
+VBroot= HBmixed HBinterleaved HBfill
+HBmixed= Label(text="start") _Text(text="") -Label2(text="end1") -Label3(text="end2") 6Label4(text="padded")
+HBinterleaved= -Label5(text="a") Label6(text="b") _Text2(text="") -Label7(text="c") Label8(text="d")
+HBfill= _Label9(text="expandfill") _.Label10(text="expandnofill") .Label11(text="plain")

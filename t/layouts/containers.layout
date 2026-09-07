@@ -1,0 +1,5 @@
+[gtk4 containers]
+Type=G
+HPmain= (size=180-120) _VBleft +VBright
+VBleft= (border=4) Label(text="left") _Play
+VBright= Label2(text="right") -Quit .Label3(text="nofill") 6Label4(text="padded")
