@@ -94,7 +94,7 @@ and the order below is set by what blocks what, not by size.
 
 | group | instances | blocked on |
 |---|---:|---|
-| menus (`MenuItem` 99, `SeparatorMenuItem` 30, the `*Item` families) | 206 | pointer input, then a `GMenu`/`PopoverMenu` design decision |
+| menus (`MenuItem` 99, `SeparatorMenuItem` 30, the `*Item` families) | 206 | **decided** — D038, port the interpreter; needs `SongList` for 23 of 50 call sites |
 | list/model (`FilterPane` 63, `SimpleSearch` 30, `SongList` 22, `SongTree` 19, `QueueList` 17, …) | 173 | the 100k-row `GListModel` probe, and D010 |
 | song-field labels (`Title` 27, `Album` 26, `Artist` 25, `Total` 26, `Time` 13, …) | 157 | a `FRONTEND_CONTRACT.md` extension, and a fixture song source |
 | everything else (`ToggleButton` 35, `Cover` 26, `Sort` 21, `TimeBar` 20, …) | 390 | mostly pointer input and the show/hide subsystem |
@@ -119,14 +119,29 @@ BLOCKED, and each gates a group above:
 4. **drag and drop**, **async finish/error**, **GStreamer loop coexistence** —
    independent of the layout surface; needed for the gate, not for widgets.
 
-Two things need a **decision from the user**, not just code, and neither is
-blocked by the probes:
+Still needing a **decision from the user**, not just code:
 
 - extending `FRONTEND_CONTRACT.md`, which is frozen for the first slice. It can
   say *which* song is current but cannot resolve an ID to field values. Until
   that is settled the 157-instance label group cannot start.
-- the `GMenu`/`PopoverMenu` model for menus, which is a genuine design change
-  rather than an API swap.
+
+Settled on 2026-09-07 (**D036**, **D037**, **D038**):
+
+- **Follow the GTK4 and freedesktop standard** for anything the port must
+  redesign, but **every bundled layout keeps working** — layout compatibility is
+  the harder constraint. `Shimmer Desktop` is the named reference layout.
+- **Icons come from the desktop theme**; dark/light becomes a three-state
+  in-app preference defaulting to system, implemented through the existing
+  display-level CSS provider because libadwaita is absent and theme-name
+  switching does not actually change the colours.
+- **Menus port the interpreter, not the instances** — a GTK4 `BuildMenu`
+  equivalent consuming the same legacy definition arrays.
+
+**`Shimmer Desktop` is the least-covered bundled layout, at 5 of 45 own
+instances (11%) against a 20% average** — it uses close to one of everything, so
+it is a good final acceptance target and a poor near-term one. It also opens
+with widgets hidden (`Window= hidden=...`) and declares `DefaultFocus` and
+`KeyBindings`, none of which is ported.
 
 ## The bottleneck, and what unblocks it
 
@@ -233,7 +248,7 @@ figures; see D034. The reliable method is to walk the parser's catalog.
 
 ## Decisions
 
-D001–D035 exist; **27 are Accepted** and **8 are unresolved**. All eight are
+D001–D038 exist; **30 are Accepted** and **8 are unresolved**. All eight are
 pre-existing and none blocks a layout increment, but four of them are gates on
 the milestones, so do not read the layout work's cleared backlog as the whole
 picture:

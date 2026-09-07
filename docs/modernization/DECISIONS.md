@@ -2075,6 +2075,245 @@ expected '1'` for the child count, `got '.1,0,.8,0' / expected 'HBinner'` for
 the name, `got 'widget' / expected 'container_ref'` for the kind, and `got '' /
 expected '.1,0,.8,0'` for the packing.
 
+## D036 — Follow the GTK4 standard for design changes; keep every layout working
+
+Status: **Accepted**
+
+Context:
+
+A standing instruction from the user, given after the input-controller probe
+closed and the four remaining design-shaped choices were put to them:
+
+> for all design changes needed, I would say to respect GTK4 as much as
+> possible, and the standard here. What I really like in Gmusicbrowser is the
+> shimmer desktop layout, but we shall keep all the layouts working. Maybe the
+> theme shall be simplified overall.
+
+This extends D029, which settled *mechanism* ("find the GTK4-native equivalent;
+if none exists, build it"). D036 settles the **presentation and platform
+convention** question that D029 explicitly did not: where GTK4 or the freedesktop
+standard has an opinion about how a thing should look or behave, follow it.
+
+Decision:
+
+1. **The GTK4 and freedesktop convention is the default** for anything the port
+   has to redesign — menu models, dialogs, icon naming, header/window
+   structure, dark-mode handling, focus and keyboard conventions.
+2. **Every bundled layout must keep working.** This is not softened by clause 1.
+   Layout compatibility is D002 and remains the harder constraint: where the
+   native convention and a bundled layout conflict, the layout wins and the
+   conflict becomes a decision entry, not a silent drop.
+3. **`Shimmer Desktop` is the reference layout** for judging whether the port
+   still feels like gmusicbrowser. It is named by the user as the layout they
+   actually use. It is not privileged in *support* terms — all layouts must
+   work — but when a judgement call needs a concrete subject, use this one.
+4. **Simplifying the theme is approved in principle**, scope still open. See the
+   open question below; this clause records the direction, not a mandate.
+
+Bounds, carried forward unchanged:
+
+- **D013 still holds.** "Follow the GTK4 standard" is not licence for a UI
+  redesign in the parity release. It governs choices the port is *forced* to
+  make, not ones it could avoid. A GTK4 mechanism that would change established
+  navigation or information density still needs its own entry.
+- **D002 still holds**, and clause 2 restates it deliberately, because clause 1
+  is the kind of instruction that erodes it by degrees.
+
+Consequences:
+
+`Shimmer Desktop` is currently the **least** covered bundled layout — 5 of its
+45 own widget instances render, 11%, against a 20% average — precisely because
+it uses close to one of everything: 4 `FilterPane`, 4 `ToggleButton`, 5
+`MenuItem`, a `SongTree`, a `SongList`, a `QueueList`, `Stars`, plugin widgets,
+and the `NB`/`BM`/`SM` containers. It also opens with widgets hidden
+(`Window= hidden=VPSongPlaylist|FilterPane2`) and declares `DefaultFocus` and
+`KeyBindings`, none of which is ported.
+
+**So "the layout I like" is a late milestone, not a near one**, and saying so is
+more useful than optimising toward it. It becomes a good acceptance target
+around the end of M5 rather than a next increment.
+
+For menus this settles the mechanism question: `GMenu`/`PopoverMenu` is the GTK4
+standard and clause 1 selects it, leaving only the scope to agree.
+
+Open question this entry does **not** settle:
+
+"Simplified theme" has at least two readings with very different costs, and the
+user has approved the direction without choosing between them. Do not assume
+one. They are set out where the choice has to be made, and the user asked to be
+given the trade-off explicitly rather than a recommendation alone.
+
+Evidence or removal condition:
+
+Accepted 2026-09-07 as a standing instruction. Revisit if following a GTK4
+convention is found to break a bundled layout, which would put clause 1 and
+clause 2 in direct conflict and require a specific entry rather than this
+general one.
+
+## D037 — Icons come from the desktop theme; dark/light is an in-app toggle defaulting to system
+
+Status: **Accepted** (direction), with the toggle's mechanism **measured** and
+its integration unscoped
+
+Gate: the preference change needs a D002 exception before it lands
+
+Context:
+
+Asked to choose between retiring gmusicbrowser's own icon-theme preference in
+favour of the desktop theme, keeping both, or deferring, the user answered:
+
+> I would say desktop theme only now, but we should have possibility to toggle
+> dark and light also in app but default to system
+
+That is the first option **plus** a requirement the option did not include, and
+the addition is the substantive part: "desktop theme only" and "an in-app
+dark/light toggle" pull in opposite directions unless the toggle is built as an
+override of the desktop theme rather than as a theme of gmusicbrowser's own.
+
+Decision:
+
+1. **Icons resolve through the desktop icon theme by themed name**, which D023
+   and D024 already implement. The bundled `pix/` packs stay on disk and remain
+   the fallback for the 28 `gmb-*` names the desktop has no equivalent for.
+2. **gmusicbrowser's own "Icon theme :" preference is retired** for the GTK4
+   frontend. It is a user-visible settings change and a saved-configuration key,
+   so it needs a D002 exception entry of its own before it lands. **No file is
+   removed from `pix/`** — that is separately forbidden and is not required by
+   this decision.
+3. **Dark/light is a three-state application preference — system, light, dark —
+   defaulting to system.** System means: install nothing and let the desktop
+   theme through, which is what D031/D032 already established.
+
+Measured mechanism, because the obvious routes do not work:
+
+- **libadwaita is absent on this host**, so `AdwStyleManager` — the standard
+  GTK4 answer for exactly this toggle — is not available and cannot be assumed.
+- **`gtk-application-prefer-dark-theme` has no GTK4 effect**, already in D006.
+- **Switching `gtk-theme-name` is not a usable toggle.** Setting it to
+  `Adwaita`, a light theme, left the label colour at `0.93,0.93,0.93` — barely
+  moved from the dark baseline. The name changes and the colour does not follow,
+  so a toggle built on theme names would appear to work while doing nothing.
+- **A display-level `GtkCssProvider` does work, exactly and reversibly.** With
+  an unambiguous test colour, a label read `0.976,0.980,0.984`, then
+  `1.000,0.000,0.000` once the class was added, then the original value again
+  once removed. That is the mechanism the toggle should use, and it is the same
+  `_StyleProvider` machinery D031/D032 already built.
+
+**Method note, because the first reading was nearly recorded as a finding.** The
+first probe used `#eeeeee` and read `0.93,0.93,0.93` — close enough to the
+baseline to look like "CSS is partly ignored". This host is already in a dark
+context, so every honest dark value sits near every other one. Re-probing with
+`rgb(255,0,0)` gave an unmistakable answer. **Probe a colour mechanism with a
+colour the theme could never produce**, or the theme's own palette masks whether
+the rule applied at all — the same family as the `font-size` trap in D006, where
+a 10pt rule measures identically to the 10pt theme font.
+
+Alternatives:
+
+1. Keep the four bundled icon packs and add the desktop theme as one more entry
+   in the existing combo. Rejected by the user in favour of "desktop theme only".
+   It would also not be a simplification: 196 icon files, the preference, the
+   loader, and a new code path, maintained permanently.
+2. Ship a gmusicbrowser dark theme. Rejected — this is what the user described
+   as "not the modern way to do things" when D031 was decided.
+3. Depend on libadwaita for the toggle. Rejected for now: it is absent here, and
+   adding it is a packaging decision that belongs with D011, not a side effect of
+   a styling preference.
+
+Consequences:
+
+`Shimmer Desktop`, the reference layout under D036, is unaffected by this: its
+appearance comes from the layout and the desktop theme, not from the icon packs.
+
+The toggle is **not yet built**. What is settled is the direction and the
+mechanism; what is unscoped is where the preference lives, since the GTK4 proof
+application still has no configuration writer at all.
+
+Evidence or removal condition:
+
+Colour measurements above, taken on real Wayland under `LC_ALL=C`. Revisit
+clause 3's mechanism if libadwaita becomes a dependency, in which case
+`AdwStyleManager` supersedes the CSS route and should be preferred as the
+standard answer under D036 clause 1.
+
+## D038 — Port the menu *interpreter* to `GMenu`/`PopoverMenu`, not the menu instances
+
+Status: **Accepted** (direction and scope), implementation not started
+
+Gate: the 23 `gmusicbrowser_list.pm` call sites cannot be exercised until
+`SongList`/`SongTree` exists
+
+Context:
+
+Menus are the largest remaining group — **206** widget instances, of which
+`MenuItem` is 99 and `SeparatorMenuItem` 30. GTK4 removed `GtkMenu` outright, so
+this is a forced rewrite rather than an API swap, and D036 clause 1 selects
+`GMenu`/`PopoverMenu` as the GTK4-standard replacement. Only the scope was open.
+
+The user first chose to port the whole subsystem in one increment. **Reading
+`BuildMenu` after that choice changed the risk, and the revised finding was put
+back to the user rather than acted on silently.**
+
+**`BuildMenu` (`gmusicbrowser.pl:4670`) is an interpreter, not a definition.**
+Every popup is constructed at popup time from live application state:
+
+- **14 conditional filters** per item — `type`, `mode`, `notmode`, `isdefined`,
+  `istrue`, `isfalse`, `empty`, `notempty`, `onlyone`, `onlymany`, `test`, and
+  `ignore`.
+- **four structural operators** that recurse — `foreach` (one item per value),
+  `include` (splice in a computed array), `repeat` (splice in several), and
+  `change_input` (rewrite the arguments for subsequent items).
+- **labels and icons may themselves be coderefs** evaluated against the same
+  arguments.
+
+`GMenu` is the opposite shape: a declarative model described up front and then
+bound to a `PopoverMenu`. Hand-porting 206 instances would mean re-encoding that
+interpreter 206 times, and much of it would need reworking once `SongList`
+lands, since **23 of the 50 `BuildMenu`/`PopupContextMenu` call sites are in
+`gmusicbrowser_list.pm`**, which is unported.
+
+Decision:
+
+Port the **interpreter**. The GTK4 side gains a `BuildMenu` equivalent that
+consumes the *same legacy menu-definition arrays* and emits a `GMenu` model
+driven by a `PopoverMenu`. The menu definitions themselves — `@SongCMenu`,
+`@cMenuAA`, `@TrayMenu` and the rest — are data and stay as they are.
+
+This keeps the user's "whole subsystem at once" intent while working with the
+dynamic shape rather than against it: one interpreter covers all 206 instances,
+and every call site that already builds a definition array keeps working.
+
+Consequences and honest bounds:
+
+- **The dynamic operators must be evaluated at popup time, not at model-build
+  time.** A `GMenu` may be rebuilt before each popup; that is the supported
+  pattern and is what preserves `foreach`/`include`/`repeat`/`change_input`.
+- **The 23 `gmusicbrowser_list.pm` call sites cannot be exercised** until
+  `SongList`/`SongTree` exists. They will be reported, not claimed as covered.
+  Any coverage figure for this decision must state that exclusion.
+- `plugins/appindicator.pm` remains explicitly out of scope: it is marked "do
+  not port its GTK3 menu".
+- Actions must reach the frontend contract's command dispatch rather than
+  calling widget code, per the architecture constraints. A menu item whose
+  command is not registered would build and then fail on activation, which is
+  the same trap already recorded for `%Buttons`.
+
+Alternatives:
+
+1. Hand-port the 206 layout instances. Rejected once the interpreter was read:
+   it re-encodes the conditional and structural logic per instance, and the
+   list-dependent half would be done twice.
+2. Prove the route on a single context menu first. Offered as the smaller step
+   after the risk was found; the user kept the subsystem scope with the
+   interpreter framing instead.
+
+Evidence or removal condition:
+
+Not yet implemented. `Gtk4::PopoverMenu` and `Gtk4::Popover` are both confirmed
+to construct (D006, input-controller probe). Revisit if the dynamic operators
+turn out to be unrepresentable against a rebuilt-per-popup `GMenu`, which would
+reopen the choice between a model and a hand-built popover.
+
 ## Decision template
 
 Copy this section for new decisions:

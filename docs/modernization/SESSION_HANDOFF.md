@@ -72,6 +72,55 @@ because the contract can say *which* song is current (`CurSong` emits
 fixture song source, since `gmusicbrowser_gtk4.pl` has no library at all. Scope
 it with the user before writing code.
 
+## Standing direction set by the user: D036, D037, D038
+
+Three decisions taken after the input probe, recorded because they govern every
+future design choice rather than one increment.
+
+**D036 — GTK4 standard, but all layouts keep working.** The user's words: "for
+all design changes needed, I would say to respect GTK4 as much as possible, and
+the standard here ... but we shall keep all the layouts working." Clause 1 picks
+the native convention; **clause 2 says layout compatibility wins where they
+conflict**, and that ordering is the load-bearing part. `Shimmer Desktop` is
+named as the reference layout — the one the user actually uses.
+
+**Do not optimise toward Shimmer Desktop yet.** It is the *least* covered
+bundled layout: 5 of 45 own instances, 11%, against the 20% average, because it
+uses close to one of everything — 4 `FilterPane`, 4 `ToggleButton`, 5
+`MenuItem`, `SongTree`, `SongList`, `QueueList`, `Stars`, plugin widgets, and
+the `NB`/`BM`/`SM` containers. It also opens with widgets hidden and declares
+`DefaultFocus`/`KeyBindings`. It is a late acceptance target, not a next step.
+
+**D037 — desktop icon theme only, plus a three-state dark/light toggle
+defaulting to system.** The user asked for "desktop theme only ... but we should
+have possibility to toggle dark and light also in app but default to system",
+which is more than the option offered, and the addition is the substantive part.
+
+Measured, because the obvious routes fail: **libadwaita is absent** so
+`AdwStyleManager` is unavailable; `gtk-application-prefer-dark-theme` has no
+GTK4 effect (already in D006); and **switching `gtk-theme-name` is not a usable
+toggle** — setting `Adwaita`, a light theme, left the colour at
+`0.93,0.93,0.93`. A display-level `GtkCssProvider` *does* work exactly and
+reversibly. **Trap worth carrying forward: probe a colour mechanism with a
+colour the theme could never produce.** The first probe used `#eeeeee`, read
+0.93, and looked like "CSS is partly ignored"; `rgb(255,0,0)` gave
+`1.000,0.000,0.000` and an unambiguous answer. This host is already dark, so
+every honest dark value sits near every other one.
+
+**D038 — menus port the interpreter, not the instances.** The user first chose
+to port the whole subsystem, then, after being shown what reading `BuildMenu`
+revealed, kept that scope with an interpreter framing. **`BuildMenu`
+(`gmusicbrowser.pl:4670`) is an interpreter**: 14 conditional filters per item
+plus `foreach`/`include`/`repeat`/`change_input`, all evaluated at popup time
+from live state — close to the opposite of `GMenu`'s declarative model. There
+are **50 call sites across 6 files, 23 of them in `gmusicbrowser_list.pm`**,
+which is unported, so those cannot be exercised until `SongList` exists and must
+be reported rather than claimed.
+
+**Method note: the risk was found *after* the user had already chosen, and was
+put back to them instead of being absorbed silently.** That is the right move
+when new information changes what the choice meant.
+
 ## Most recent session, second increment: the M1 input-controller probe
 
 `t/gtk4/50_Input.t`, 27 assertions. Chosen over the bigger rendering groups
