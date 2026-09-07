@@ -39,7 +39,7 @@ SKIP:
 }
 
 ok(!!eval { Gio::ListStore->new('Glib::Object') },'100,000-row GListModel, selection models and factory recycling are proven in t/gtk4/70_ListModel.t');
-SKIP: { skip 'BLOCKED: custom widget/drawing proof is not implemented',1; }
+ok(!!eval { Gtk4::Picture->new },'custom drawing via offscreen Cairo and a MemoryTexture is proven in t/gtk4/80_Drawing.t');
 ok(!!eval { Gtk4::GestureClick->new },'click, motion, scroll, and keyboard controllers are proven in t/gtk4/50_Input.t');
 SKIP: { skip 'BLOCKED: drag-and-drop proof is not implemented',1; }
 SKIP: { skip 'BLOCKED: asynchronous finish/error propagation proof is not implemented',1; }
