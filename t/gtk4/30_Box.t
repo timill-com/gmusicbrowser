@@ -24,6 +24,7 @@ die (($backend->{error} || 'GTK4 display is not Wayland')."\n") unless $backend-
 require 'gmusicbrowser_frontend.pm';
 require 'gmusicbrowser_layout_parser.pm';
 require 'gmusicbrowser_gtk4_layout.pm';
+require 't/RendererLabels.pm';
 
 ok(!exists $INC{'Gtk3.pm'},'GTK4 box test does not load Gtk3');
 
@@ -58,7 +59,7 @@ my @children=('Label','Text','Text2',map {"Label$_"} 2..11);
 my $renderer=Layout::Renderer::Gtk4->new
 (	catalog=>$catalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
+	labels=>GMB::Test::RendererLabels::labels(),
 );
 my $root=$renderer->Render('gtk4 packing');
 $root->set_direction('ltr');
@@ -178,7 +179,7 @@ _drain();
 	my $srenderer=Layout::Renderer::Gtk4->new
 	(	catalog=>$scatalog,
 		frontend=>$frontend,
-		labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
+		labels=>GMB::Test::RendererLabels::labels(),
 	);
 	my $sroot=$srenderer->Render('gtk4 sizing');
 	$sroot->set_direction('ltr');

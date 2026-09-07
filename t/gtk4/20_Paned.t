@@ -25,6 +25,7 @@ die (($backend->{error} || 'GTK4 display is not Wayland')."\n") unless $backend-
 require 'gmusicbrowser_frontend.pm';
 require 'gmusicbrowser_layout_parser.pm';
 require 'gmusicbrowser_gtk4_layout.pm';
+require 't/RendererLabels.pm';
 
 ok(!exists $INC{'Gtk3.pm'},'GTK4 pane test does not load Gtk3');
 
@@ -85,7 +86,7 @@ sub _render
 	my $renderer=Layout::Renderer::Gtk4->new
 	( catalog=>_catalog($orientation,$size,$packing),
 	  frontend=>$frontend,
-	  labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
+	  labels=>GMB::Test::RendererLabels::labels(),
 	);
 	my $paned=$renderer->Render('gtk4 containers');
 	$paned->set_direction('ltr');

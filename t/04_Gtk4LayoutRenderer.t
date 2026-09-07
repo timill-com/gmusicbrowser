@@ -128,6 +128,7 @@ use lib '.';
 require 'gmusicbrowser_frontend.pm';
 require 'gmusicbrowser_layout_parser.pm';
 require 'gmusicbrowser_gtk4_layout.pm';
+require 't/RendererLabels.pm';
 
 my $fixture=File::Spec->catfile('t','layouts','proof.layout');
 my $catalog=Layout::Parser::ParseFiles(files=>[$fixture]);
@@ -146,7 +147,7 @@ $frontend=GMB::Frontend->new
 my $renderer=Layout::Renderer::Gtk4->new
 (	catalog=>$catalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
+	labels=>GMB::Test::RendererLabels::labels(),
 	context=>{window_id=>'MainWindow',group=>'Play',selected_ids=>[]},
 );
 my $root=$renderer->Render('gtk4 proof');
@@ -179,7 +180,7 @@ is(scalar @{$ccatalog->{diagnostics}},0,'container fixture parses without diagno
 my $crenderer=Layout::Renderer::Gtk4->new
 (	catalog=>$ccatalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
+	labels=>GMB::Test::RendererLabels::labels(),
 );
 my $paned=$crenderer->Render('gtk4 containers');
 
@@ -258,7 +259,7 @@ for my $case
 	$node->{children}[1]{packing}{raw}=$end;
 	my $prenderer=Layout::Renderer::Gtk4->new
 	(	catalog=>$pcatalog, frontend=>$frontend,
-		labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
+		labels=>GMB::Test::RendererLabels::labels(),
 	);
 	my $pane=$prenderer->Render('gtk4 containers');
 	$pane->allocate(600);
@@ -279,7 +280,7 @@ is(scalar @{$pkcatalog->{diagnostics}},0,'packing fixture parses without diagnos
 my $pkrenderer=Layout::Renderer::Gtk4->new
 (	catalog=>$pkcatalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
+	labels=>GMB::Test::RendererLabels::labels(),
 );
 $pkrenderer->Render('gtk4 packing');
 
@@ -312,7 +313,7 @@ is(scalar @{$scatalog->{diagnostics}},0,'single-child fixture parses without dia
 my $srenderer=Layout::Renderer::Gtk4->new
 (	catalog=>$scatalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
+	labels=>GMB::Test::RendererLabels::labels(),
 );
 $srenderer->Render('gtk4 single');
 
@@ -364,7 +365,7 @@ $bfrontend=GMB::Frontend->new
 my $brenderer=Layout::Renderer::Gtk4->new
 (	catalog=>$bcatalog,
 	frontend=>$bfrontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
+	labels=>GMB::Test::RendererLabels::labels(),
 	context=>{window_id=>'MainWindow',group=>'Play',selected_ids=>[]},
 );
 $brenderer->Render('gtk4 buttons');
@@ -426,7 +427,7 @@ is(scalar @{$zcatalog->{diagnostics}},0,'sizing fixture parses without diagnosti
 my $zrenderer=Layout::Renderer::Gtk4->new
 (	catalog=>$zcatalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
+	labels=>GMB::Test::RendererLabels::labels(),
 );
 my $zroot=$zrenderer->Render('gtk4 sizing');
 
@@ -451,6 +452,14 @@ is_deeply([$zrenderer->Widget('Text')->get_size_request],[-1,-1],'a widget with 
 # and containers, matching the second legacy call site
 is_deeply([$zroot->get_size_request],[320,-1],'a container honours minwidth');
 is_deeply([$zrenderer->Widget('HBfillers')->get_size_request],[-1,-1],'a container with no size option is left unrequested');
+
+# The fixture must hand out a fresh copy, or one test mutating its labels would
+# change another's. A %Buttons entry with no fixture label needs no assertion:
+# the constructor already refuses it by name at the first renderer built.
+{	my $labels=GMB::Test::RendererLabels::labels();
+	isnt($labels,GMB::Test::RendererLabels::labels(),'the labels fixture hands out a copy');
+	is_deeply($labels,GMB::Test::RendererLabels::labels(),'each copy has the same content');
+}
 
 # the merge must not clobber a dimension the layout did not name
 $zrenderer->Widget('Label5')->set_size_request(55,40);

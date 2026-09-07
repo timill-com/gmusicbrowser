@@ -10,9 +10,9 @@ make test-modernization
 
 This runs the neutral layout parser, frontend contract and lifecycle, legacy
 adapter and lifecycle integration, and GTK4 renderer contract tests. On
-2026-09-07, after the `Filler` and size-request increment, it reported 315
-executed assertions passed and no skips, up from 298 after `Next`/`Prev` and
-269 before that. The
+2026-09-07 it reported 317 executed assertions passed and no skips. Running
+totals across this session's three increments: 269 before it, 298 after
+`Next`/`Prev`, 315 after `Filler`, 317 after the shared labels fixture. The
 renderer test uses small in-process GTK doubles; it proves the
 parser/renderer/command wiring without claiming that a real GTK4 binding or
 display passed.
@@ -241,6 +241,27 @@ than reimplemented.
 
 `hover_layout`, the other half of `ApplyCommonOptions`, is not ported and has
 no test: it needs a popup window and a widget with its own `GdkWindow`.
+
+## Shared test fixtures
+
+`t/RendererLabels.pm` holds the one `labels` hash the renderer tests pass. The
+renderer takes every user-visible string from its caller and its constructor
+rejects a hash missing any `%Buttons` tooltip, so before this the literal was
+duplicated at 13 call sites across four files and every new tooltip-bearing
+widget meant editing all of them. Load it with `require 't/RendererLabels.pm'`
+alongside the other module requires; the tests all run with `use lib '.'` from
+the repository root, and the GTK4 runner keeps that working directory.
+
+The values match the `%Layout::Widgets` tips in `gmusicbrowser_layout.pm`,
+which is what pins a tooltip assertion to the right widget entry — `Next` is
+`Next Song` and `Prev` is `Recently played songs`, not the widget names.
+
+`labels()` returns a fresh copy each call, asserted in
+`t/04_Gtk4LayoutRenderer.t`, so one test mutating its labels cannot affect
+another. There is deliberately no assertion that the fixture satisfies the
+constructor: a `%Buttons` entry with no fixture label already aborts the whole
+file at the first renderer built, with `GTK4 layout renderer needs the '<name>'
+label`, which is a clearer failure than any test could add.
 
 The symbolic fallback is a behaviour change, not a construction detail. Run
 against the previous `_IconName` in a scratch copy of the tree,

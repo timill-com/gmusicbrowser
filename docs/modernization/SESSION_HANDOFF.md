@@ -1,9 +1,10 @@
 # Session handoff
 
-Status: `HEAD` is `6d30dcf` "gtk4: render the Next and Prev widgets", which
-also added the first shared-boundary change of the port and a working GTK3
-regression smoke. Uncommitted on top of it: `Filler` plus the legacy
-`ApplyCommonOptions` size request.
+Status: `HEAD` is `fc65354` "gtk4: render Filler and apply the legacy size
+request". Three increments landed this session: `Next`/`Prev` with the port's
+first shared-boundary change and a working GTK3 regression smoke, then `Filler`
+with the legacy `ApplyCommonOptions` size request, then the shared test labels
+fixture. Uncommitted on top: that fixture.
 
 Last session: 2026-09-07. Branch `gtk4-alpha`.
 
@@ -26,22 +27,21 @@ otherwise from the size of the planning documents.
 
 ## What is committed and what is not
 
-Everything through `Next`/`Prev` is committed; `HEAD` is `6d30dcf` and
-`gtk4-alpha` is seven commits past `master`.
+Everything through `Filler` is committed; `HEAD` is `fc65354` and `gtk4-alpha`
+is eight commits past `master`.
 
-Uncommitted in the tree is the `Filler` and size-request increment:
+Uncommitted in the tree is the shared labels fixture:
 
-	M docs/modernization/DECISIONS.md
-	M docs/modernization/PARITY_CHECKLIST.md
 	M docs/modernization/SESSION_HANDOFF.md
 	M docs/modernization/TESTING.md
-	M gmusicbrowser_gtk4_layout.pm
 	M t/04_Gtk4LayoutRenderer.t
+	M t/gtk4/20_Paned.t
 	M t/gtk4/30_Box.t
-	?? t/layouts/sizing.layout
+	M t/gtk4/40_Icons.t
+	?? t/RendererLabels.pm
 
 No GTK3 production code, bundled layout, or file in `pix/` has been touched by
-either increment. `gmusicbrowser.pl` is unmodified.
+any of the three increments. `gmusicbrowser.pl` is unmodified.
 
 ## Renderer widget state
 
@@ -88,6 +88,31 @@ which reproduces both groups' legacy order including interleaved `-a b -c d`.
 `insert_child_after($widget,undef)` prepends, correct when no start child
 exists yet. `_CreatePaned` implements `PanedPack`, and `_CreateSingle` covers
 `SB`, `FR`, `EB`, `AB`, and `WB`.
+
+## This session, third increment: the shared labels fixture
+
+`t/RendererLabels.pm` now holds the one `labels` hash the renderer tests pass,
+replacing 13 copies of a literal that had grown once per tooltip-bearing
+widget. Net effect on the test files is smaller than the module it adds, and
+adding the next such widget is now a one-line change instead of a
+thirteen-line one.
+
+Two things learned while doing it:
+
+- The values must match the `%Layout::Widgets` tips, not the widget names:
+  `Next` is `Next Song`, `Prev` is `Recently played songs`. That is what makes
+  a tooltip assertion pin the right widget entry.
+- An assertion that the fixture satisfies the constructor is worthless and was
+  removed. A `%Buttons` entry with no fixture label aborts the whole file at
+  the first renderer built, with
+  `GTK4 layout renderer needs the '<name>' label`, before any such assertion
+  runs. Verified by adding a fake `Refresh` entry to a scratch copy. What is
+  worth asserting is that `labels()` hands out a *copy*, which was verified to
+  fail when the module returns `\%Labels` instead.
+
+`gmusicbrowser_gtk4.pl` deliberately still carries its own literal: it is
+production code and needs the `_"..."` gettext idiom, which is exactly what
+`t/RendererLabels.pm` must not contain.
 
 ## This session, second increment: `Filler` and the legacy size request
 
@@ -210,14 +235,12 @@ shown a text label on stock GNOME. This is direct evidence for moving D024 out
 of Proposed. The Wayland assertions accept either spelling so they do not pin
 one theme's convention.
 
-### The labels hash is now at twelve call sites
+### The labels hash, and the cleanup that followed
 
 The renderer constructor rejects a `labels` hash missing any `%Buttons`
 tooltip, so `next` and `prev` had to be added at eleven test call sites plus
-`gmusicbrowser_gtk4.pl`. The duplicated literal is now a genuine maintenance
-cost — the next widget with a tooltip will touch all twelve again. Extracting
-a fixture constant was deliberately **not** bundled here, per the previous
-handoff, but it should be the next cleanup.
+`gmusicbrowser_gtk4.pl`. That duplicated literal was extracted into
+`t/RendererLabels.pm` in the third increment of this session; see below.
 
 ## The GTK3 regression smoke now exists
 
@@ -441,9 +464,9 @@ Commands that were actually run and passed this session:
 	make test-gtk3
 	git diff --check
 
-`make test-modernization`: **315** executed assertions passed, no skips. Running
-totals: 269 at the start of the session, 298 after `Next`/`Prev`, 315 now. The
-skip count was read from `prove -v`, not assumed.
+`make test-modernization`: **317** executed assertions passed, no skips.
+Running totals: 269 at the start of the session, 298 after `Next`/`Prev`, 315
+after `Filler`, 317 now. The skip count was read from `prove -v`, not assumed.
 
 `make test-gtk4` on the real Wayland connection: **202** TAP results,
 comprising **196 executed assertions passed** and the same six pre-existing M1
@@ -609,10 +632,9 @@ means the reported ~1190px window is not the layout's designed size.
 
 ## Suggested next steps
 
-1. **Highest-value cleanup, now overdue:** extract the `labels` hash into a
-   test fixture constant. It is duplicated at eleven test call sites plus
-   `gmusicbrowser_gtk4.pl`, and every future tooltip-bearing widget touches all
-   twelve. Deliberately not bundled with either increment this session.
+1. Extract the `labels` hash into a test fixture constant. **Done this
+   session**, as `t/RendererLabels.pm`. Add a new `%Buttons` tooltip there, not
+   at each call site.
 2. Next widget candidates, by instance count, excluding menus: `FilterPane`
    (75), `Window` (39), `SimpleSearch` (38), `ToggleButton` (38).
    `ToggleButton` is the most tractable: it is a `Layout::Button` variant with

@@ -24,6 +24,7 @@ die (($backend->{error} || 'GTK4 display is not Wayland')."\n") unless $backend-
 require 'gmusicbrowser_frontend.pm';
 require 'gmusicbrowser_layout_parser.pm';
 require 'gmusicbrowser_gtk4_layout.pm';
+require 't/RendererLabels.pm';
 
 ok(!exists $INC{'Gtk3.pm'},'GTK4 icon test does not load Gtk3');
 
@@ -44,7 +45,7 @@ $frontend=GMB::Frontend->new
 my $renderer=Layout::Renderer::Gtk4->new
 (	catalog=>$catalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
+	labels=>GMB::Test::RendererLabels::labels(),
 	icon_path=>'pix',
 );
 $renderer->Render('gtk4 icons');
@@ -115,7 +116,7 @@ for my $name (qw/Play Play2 Quit2/)
 	my $probe=Layout::Renderer::Gtk4->new
 	(	catalog=>$catalog,
 		frontend=>$frontend,
-		labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
+		labels=>GMB::Test::RendererLabels::labels(),
 		icon_path=>'pix',
 	);
 	$probe->{icon_theme}=$adwaita;
@@ -177,7 +178,7 @@ $renderer->Destroy;
 	my $brenderer=Layout::Renderer::Gtk4->new
 	(	catalog=>$bcatalog,
 		frontend=>$bfrontend,
-		labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
+		labels=>GMB::Test::RendererLabels::labels(),
 		icon_path=>'pix',
 	);
 	$brenderer->Render('gtk4 buttons');
