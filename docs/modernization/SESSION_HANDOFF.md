@@ -1,8 +1,9 @@
 # Session handoff
 
-Status: `HEAD` is `0074c06` "docs: record the session's landed commits in the
-handoff" plus one uncommitted increment: the legacy `size=`/`relief=` button
-options, recorded as **D027**. The tree is otherwise clean.
+Status: `HEAD` is `a315171` "docs: record D027, and correct the ToggleButton
+recommendation". The tree is clean. One increment landed this session: the
+legacy `size=`/`relief=` button options, recorded as **D027**, plus the
+correction of the previous handoff's `ToggleButton` recommendation.
 
 Last session: 2026-09-07. Branch `gtk4-alpha`.
 
@@ -61,8 +62,11 @@ otherwise from the size of the planning documents.
 
 ## What is committed and what is not
 
-`HEAD` is `0074c06` and `gtk4-alpha` is ten commits past `master`:
+Everything is committed. `HEAD` is `a315171` and `gtk4-alpha` is twelve commits
+past `master`:
 
+	a315171 docs: record D027, and correct the ToggleButton recommendation
+	54b0a8f gtk4: apply the legacy button size and relief options
 	0074c06 docs: record the session's landed commits in the handoff
 	b85b89d docs: decide AB and WB, and cover AB alignment on real Wayland
 	527eae9 gtk4: share one labels fixture across the renderer tests
@@ -75,15 +79,15 @@ otherwise from the size of the planning documents.
 	d4c87d0 agents file
 	774aa2e initial plan
 
-The `size=`/`relief=` increment described below is **not committed**. Modified,
-and nothing else:
+The `size=`/`relief=` increment touched five files and nothing else:
 
 	gmusicbrowser_gtk4_layout.pm
 	t/04_Gtk4LayoutRenderer.t
 	t/gtk4/40_Icons.t
 	t/layouts/buttons.layout
 	t/layouts/icons.layout
-	docs/modernization/{DECISIONS,PARITY_CHECKLIST,TESTING,SESSION_HANDOFF}.md
+
+with the documentation changes committed separately.
 
 No GTK3 production code, bundled layout, or file in `pix/` has been touched by
 any increment on this branch. `gmusicbrowser.pl` is unmodified. No file has been
