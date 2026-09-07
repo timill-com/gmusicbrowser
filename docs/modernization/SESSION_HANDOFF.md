@@ -66,8 +66,10 @@ otherwise from the size of the planning documents.
 
 ## What is committed and what is not
 
-Everything is committed. `gtk4-alpha` is fourteen commits past `master`:
+Everything is committed. `HEAD` is `cf933af` and `gtk4-alpha` is fifteen
+commits past `master`:
 
+	cf933af docs: record D028, and correct the markup usage count
 	58d7cb3 gtk4: apply the legacy label alignment and ellipsize options
 	20f676f docs: record the landed commits in the handoff
 	a315171 docs: record D027, and correct the ToggleButton recommendation
