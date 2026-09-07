@@ -1,13 +1,25 @@
 # Session handoff
 
-Status: the tree is clean. Two increments landed this session, both closing
-default-level correctness gaps in already-rendered widgets:
+Status: the tree is clean. **The decision backlog is cleared.** All six
+Proposed entries that gated parity rows — D023, D024, D025, D026, D027, D028 —
+were put to the user and are now **Accepted**. That was the main thing
+stopping the parity checklist from moving, and it is done.
 
-1. The legacy `size=`/`relief=` button options, recorded as **D027**.
-2. The legacy `Layout::Label` `xalign`/`yalign`/`ellipsize` options, recorded
-   as **D028**.
+Five were accepted as implemented, with no code change. One was accepted
+*against* the entry's own recommendation and became this session's increment:
 
-Plus the correction of the previous handoff's `ToggleButton` recommendation.
+- **D028 alternative 2** — normalise a label's `ellipsize=1` to `'end'`,
+  following `Layout::Button`. The entry originally recommended preserving the
+  legacy asymmetry; the user's call was to normalise. The entry has been
+  rewritten rather than annotated, and the change is recorded as a
+  **deliberate parity exception**, since GTK3 leaves such a label
+  un-ellipsized.
+
+What the acceptances did **not** do, and this matters for reading the
+checklist: D025 and D026 were accepted *as documented approximations*, so the
+`AB` and `WB` rows deliberately stay at `GTK4 in progress`. Acceptance removed
+the decision gate on each row without advancing it. No row was advanced to
+`Parity review` this session.
 
 Last session: 2026-09-07. Branch `gtk4-alpha`.
 
@@ -51,6 +63,65 @@ What the previous handoff got right is the other half of its recommendation:
 `size=` and `relief=` were "the larger prize". That part was independent of
 `ToggleButton` and is what this session did.
 
+## This session's increment: normalising the label `ellipsize=1` shorthand
+
+The only code change of the session, and it exists because accepting D028
+alternative 2 reversed what the implementation did.
+
+`Layout::Button` maps an `ellipsize=` of `'1'` to `'end'`
+(`gmusicbrowser_layout.pm:3051`); `Layout::Label` passes the value straight to
+`set_ellipsize` (`:3128`). Both were read in production code, not assumed. So
+`ellipsize=1` on a GTK3 label does not ellipsize, and the renderer previously
+reproduced that by filtering the value and reporting it through `Unhandled`.
+It now normalises it, so both legacy classes understand the shorthand.
+
+Three things worth carrying forward:
+
+- **This is a parity exception, not a translation, and is recorded as one.**
+  It changes rendering relative to GTK3. What makes it cheap is that no
+  bundled layout can reach it: all **37** `ellipsize=` uses across `layouts/`
+  name `end`, isolated with `[(,]ellipsize=` so that `lmarkup=`-style prefixes
+  and `minsize=` cannot inflate the count. Only a hand-written layout reaches
+  the `'1'` form.
+- **Normalising a value removes it from the out-of-range case, so the fatal
+  enum filter loses its coverage unless a new value replaces it.** `'1'` used
+  to be the out-of-range fixture. The fixture now carries
+  `Text5(ellipsize=sideways)` for that, which is what keeps the filter tested;
+  without it the increment would have silently deleted a test of a fatal
+  failure mode.
+- **An option leaving the ignored list is part of the change.** `ellipsize=1`
+  previously appeared in `Unhandled`; it must not any more. That assertion
+  fails against pristine in the offline file and is what pins the bookkeeping.
+
+### The measurement, and why the fixture reads the way it does
+
+`Text`, `Text2`, and `Text3` all carry the **identical** text `"ellipsized"`.
+
+| Label | `ellipsize=` | Minimum width now | Against pristine |
+|---|---|---:|---:|
+| `Text` | `end` | 12 | 12 |
+| `Text2` | `none` | 64 | 64 |
+| `Text3` | `1` | 12 | **64** |
+
+The 64 is the full text width. Had `Text3` carried a different string it would
+have measured the string and passed against the un-normalised renderer, which
+is exactly the trap the previous session recorded for the original ellipsize
+assertions. The identical text is what makes the comparison turn on the option.
+
+### Verification for this increment
+
+- `t/gtk4/30_Box.t` fails **3 of 81** against a pristine `git archive HEAD`
+  with only the changed test files and the fixture overlaid, on real Wayland.
+  The renderer in that copy was confirmed to contain no `_Ellipsize`.
+- `t/04_Gtk4LayoutRenderer.t` fails **2 of 179** offline against the same.
+- Controls pass on both trees: both `ellipsize=sideways` assertions, and
+  `ellipsize=end lowers the minimum width below the un-ellipsized one`. The
+  comparison discriminates rather than merely failing everything.
+- Each new assertion was checked individually from `prove -v`, not inferred
+  from the file's failure count, and the pristine failure of the minimum-width
+  assertion was confirmed to be `got 64 / expected 12` — the right reason.
+- No shared code changed. `make test-gtk3` was run anyway and passes.
+
 ## Actual state of the port
 
 The GTK4 work is an early spike, not a partly-finished migration. Do not assume
@@ -82,6 +153,9 @@ Everything is committed. For the number of commits past `master`, run
 `git rev-list --count master..HEAD` rather than trusting a figure here.
 Newest first:
 
+	adde70b gtk4: normalise the label ellipsize=1 shorthand to end
+	f6d2927 docs: stop recording a commit count that goes stale on write
+	f74d4e1 docs: record the landed commits in the handoff
 	80fcf7c docs: correct the commit count and reconcile the Gtk3 reference count
 	9df79dc docs: record the landed commits in the handoff
 	cf933af docs: record D028, and correct the markup usage count
@@ -101,7 +175,13 @@ Newest first:
 	d4c87d0 agents file
 	774aa2e initial plan
 
-Neither increment touched shared code. The `size=`/`relief=` one changed
+This session's increment touched no shared code either. It changed
+`gmusicbrowser_gtk4_layout.pm`, `t/04_Gtk4LayoutRenderer.t`,
+`t/gtk4/30_Box.t`, and `t/layouts/labels.layout`. Documentation is committed
+separately, as before.
+
+Of the previous session's two, neither touched shared code. The
+`size=`/`relief=` one changed
 `gmusicbrowser_gtk4_layout.pm`, `t/04_Gtk4LayoutRenderer.t`,
 `t/gtk4/40_Icons.t`, `t/layouts/buttons.layout`, and `t/layouts/icons.layout`;
 the label one changed `gmusicbrowser_gtk4_layout.pm`,
@@ -310,7 +390,9 @@ value outside the mapping.
 
 `Label` and `Text` likewise get the legacy `Layout::Label` defaults, so they
 are left-aligned rather than centred, and `xalign`/`yalign`/`ellipsize` are
-applied. See D028. `%LabelHandled` covers `text`, `xalign`, `yalign`,
+applied. See D028, now Accepted. A label's `ellipsize=1` is normalised to
+`'end'` under its alternative 2, which is the one accepted parity exception in
+the renderer: GTK3 leaves such a label un-ellipsized. `%LabelHandled` covers `text`, `xalign`, `yalign`,
 `ellipsize`, `minwidth`, and `minheight`; `markup`, `font`, `color`, `minsize`,
 and `expand_max` stay reported.
 
@@ -775,17 +857,19 @@ Commands that were actually run and passed this session:
 	make test-gtk3
 	git diff --check
 
-`make test-modernization`: **342** executed assertions passed, no skips.
+`make test-modernization`: **344** executed assertions passed, no skips.
 Running totals: 269 two sessions ago, 298 after `Next`/`Prev`, 315 after
 `Filler`, 317 after the labels fixture, 325 after `size=`/`relief=`, 342 after
-label alignment. The skip count was read from `prove -v`, not assumed.
+label alignment, 344 after the `ellipsize=1` normalisation. The skip count was
+read from `prove -v`, not assumed.
 
-`make test-gtk4` on the real Wayland connection: **258** TAP results,
-comprising **252 executed assertions passed** and the same six pre-existing M1
+`make test-gtk4` on the real Wayland connection: **261** TAP results,
+comprising **255 executed assertions passed** and the same six pre-existing M1
 feasibility probes skipped, 0 failures. Per file: 18 binding (which is where
-all six skips live), 4 proof-of-life, 84 pane, 78 box, 74 icon. Running totals
+all six skips live), 4 proof-of-life, 84 pane, 81 box, 74 icon. Running totals
 for the same command: 173 before `Next`/`Prev`, 184 after it, 202 after
-`Filler`, 216 after the `AB` coverage, 246 after `size=`/`relief=`, 258 now. Do not restate this as 246
+`Filler`, 216 after the `AB` coverage, 246 after `size=`/`relief=`, 258 after
+label alignment, 261 now. Do not restate this as 255
 passing assertions. The six skips were counted by copying the runner to
 `tools/.verbose-smoke-tmp`, switching `prove` to `-v`, and grepping
 `^ok [0-9]+ # skip` — six matches, all `BLOCKED:` M1 probes in
@@ -953,18 +1037,22 @@ means the reported ~1190px window is not the layout's designed size.
 
 ## Suggested next steps
 
-1. **Decide D027 and D028**, both written this session as **Proposed**. They
-   are the narrowest of the open decisions: both translations are lossless and
-   measured in both toolkits, so the only real questions are D027's
-   alternative 3 (`set_has_frame` versus `add_css_class('flat')`) and D028's
-   alternative 2 (whether to preserve the `Layout::Button`/`Layout::Label`
-   `ellipsize=1` asymmetry, which the implementation currently does). Every
-   button and label row is blocked behind them, because until they are accepted
-   the sizing and alignment are unaccepted approximations on paper even though
-   both are exact in fact.
-   There are now **six** Proposed entries — D023, D024, D025, D026, D027,
-   D028 — and every one of them gates a row. That backlog is the main thing
-   stopping the parity checklist from moving, not missing implementation.
+1. ~~Decide the six Proposed entries.~~ **Done.** D023, D024, D025, D026,
+   D027, and D028 are all Accepted. The recorded resolutions, so a later
+   session does not reopen them:
+   - **D027** — `set_has_frame`, not `add_css_class('flat')`. Alternative 3
+     rejected; the style class would entangle button relief with the
+     undecided `font=`/`color=` CSS work.
+   - **D028** — normalise `ellipsize=1` to `'end'` on labels. Alternative 2
+     accepted, reversing the entry's original recommendation.
+   - **D023/D024** — accepted together. The `gmb-*` to freedesktop mapping
+     stays deferred under D023 alternative 2 and was explicitly left deferred.
+   - **D025/D026** — accepted as documented approximations. Their gaps are
+     *not* waived, so the `AB` and `WB` rows stay where they are.
+
+   The four entries still marked Proposed in `DECISIONS.md` — D009, D011,
+   D012, D019 — are pre-existing and unrelated to the layout rows. Do not
+   mistake them for this backlog.
 2. Next widget candidates. **Do not take `ToggleButton` as a button
    increment** — see the section at the top of this file for why the previous
    recommendation was wrong. Corrected reading:
@@ -986,26 +1074,25 @@ means the reported ~1190px window is not the layout's designed size.
 3. Keep running `make test-gtk4` on the real Wayland connection with the system
    packages, outside the execution sandbox when needed. Count explicit skips.
    Also run `make test-gtk3` after any shared-code change; it works now.
-4. `DECISIONS.md` entries for `AB` and `WB`. **Written this session** as D025
-   and D026, both **Proposed**. Accept them, or push back. Accepting D025 does
-   not by itself advance the `AB` row: the fractional alignment/scale gap it
-   documents has to be closed or explicitly waived first. Accepting D026 needs
-   a call on its alternative 2, folding `hover_layout` into `WB`.
+4. `AB` and `WB`. D025 and D026 are **Accepted**, but as documented
+   approximations, so the real work is unchanged and still open: close D025's
+   fractional alignment/scale gap (its alternative 1, a custom widget with
+   `measure`/`size_allocate` vfunc overrides, which D006 has not established),
+   or get it explicitly waived. D026 alternative 2 — folding `hover_layout`
+   into `WB` — is still undecided and still needs a popup-window design.
 5. D006 binding evidence. **Already recorded, keep extending it.** D006 now
    holds the graphene marshalling failure, the `->can` segfault, the
    widget-before-`Gtk4::init` segfault, the empty-string boolean artifact, the
    `set_theme_name` display-singleton refusal, the
    `get_size_request`/`set_size_request`/`measure` findings, and this session's
    fatal-enum, `Button`-image-child, and `set_has_frame` findings.
-6. Move D023 from Proposed to Accepted, or push back on it, before more
-   icon-bearing widgets are added. D024 is now in the same position: both are
-   Proposed and both concern icon resolution, so decide them together.
-   **New evidence for D024 this session:** `Next` and `Prev` are its first
-   production consumers. Adwaita carries `media-skip-forward` and
-   `media-skip-backward` only as `-symbolic`, so without the fallback both
-   would render as text on stock GNOME, a D022 target.
-   Decide also whether to propose mapping `gmb-*` to freedesktop names, which
-   D023 alternative 2 currently defers and which this session did not do.
+6. ~~Decide D023 and D024.~~ **Done**, both Accepted, so icon-bearing
+   widgets are no longer gated. Still open underneath them: whether to propose
+   mapping the 28 bundled `gmb-*` names to freedesktop names. That stays
+   deferred by D023 alternative 2 and needs its own entry, because those files
+   back gmusicbrowser's own "Icon theme :" preference at
+   `gmusicbrowser.pl:7023` with three packs in `pix/`. Several `gmb-view-*`
+   names also have no reliably available standard equivalent.
 7. Investigate the queue clipping properly: make `QueueList` propagate a
    minimum width from its configured columns. See the dead-end section above
    before touching `layouts/shimmer.layout`; the obvious `+` fix is disproven.
@@ -1047,6 +1134,15 @@ means the reported ~1190px window is not the layout's designed size.
   no display, so `_IconTheme` returns undef, `_IconName` returns early, and no
   icon resolves at all — every button falls back to a text label with no image.
   Icon-size assertions belong in `t/gtk4/40_Icons.t`.
+- **Normalising a previously-rejected option value silently removes the
+  coverage of the reject path.** `ellipsize=1` was the out-of-range fixture
+  before D028 alternative 2 made it valid; the fatal-enum filter would have
+  been left untested had `Text5(ellipsize=sideways)` not replaced it. When an
+  increment makes a bad value good, check what that value was previously
+  proving and replace it.
+- **An option that becomes handled must leave the `Unhandled` list, and that
+  is a test in its own right.** It is the half of a "now implemented" change
+  that is easiest to forget, and it fails against pristine, so it discriminates.
 - **`Label->get_layout_offsets` is the only observable for a label's
   alignment.** `translate_coordinates` cannot see it: the label widget *is* the
   full slot, and the alignment moves the text inside it. This is the opposite of

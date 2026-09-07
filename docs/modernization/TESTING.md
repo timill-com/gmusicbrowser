@@ -10,10 +10,12 @@ make test-modernization
 
 This runs the neutral layout parser, frontend contract and lifecycle, legacy
 adapter and lifecycle integration, and GTK4 renderer contract tests. On
-2026-09-07 it reported 342 executed assertions passed and no skips. Running
+2026-09-07 it reported 344 executed assertions passed and no skips. Running
 totals: 269 at the start of the previous session, 298 after `Next`/`Prev`, 315
 after `Filler`, 317 after the shared labels fixture, 325 after the
-`size=`/`relief=` increment, 342 after label alignment/ellipsize. The
+`size=`/`relief=` increment, 342 after label alignment/ellipsize, 344 after the
+`ellipsize=1` normalisation. The skip count was read from `prove -v`, not
+assumed. The
 renderer test uses small in-process GTK doubles; it proves the
 parser/renderer/command wiring without claiming that a real GTK4 binding or
 display passed.
@@ -71,15 +73,16 @@ The action test uses [cycle-handle-focus](https://docs.gtk.org/gtk4/signal.Paned
 before [move-handle](https://docs.gtk.org/gtk4/signal.Paned.move-handle.html).
 
 `t/gtk4/30_Box.t` adds real `HB`/`VB` packing geometry to the runner, plus the
-`AB` and label alignment coverage. On 2026-09-07, after the label
-alignment/ellipsize increment, the full
-`make test-gtk4` run reported 258 TAP results: 252 executed assertions passed
+`AB` and label alignment coverage. On 2026-09-07, after the `ellipsize=1`
+normalisation, the full
+`make test-gtk4` run reported 261 TAP results: 255 executed assertions passed
 and the same six feasibility probes were skipped, 0 failures. The skips were
 counted from `prove -v` and are the same six M1 probes as before. Running
 totals for the same command: 173 results before `Next`/`Prev`, 184 after it,
 202 after `Filler`, 216 after the `AB` alignment coverage, 246 after
-`size=`/`relief=`, 258 after label alignment. Per file: 18 binding, which is
-where all six skips live, 4 proof-of-life, 84 pane, 78 box, 74 icon.
+`size=`/`relief=`, 258 after label alignment, 261 after the `ellipsize=1`
+normalisation. Per file: 18 binding, which is
+where all six skips live, 4 proof-of-life, 84 pane, 81 box, 74 icon.
 They read allocated child offsets with
 [translate_coordinates](https://docs.gtk.org/gtk4/method.Widget.translate_coordinates.html);
 `compute_bounds` and `compute_point` are unusable through this binding, which
@@ -269,8 +272,48 @@ position.
 This is **coverage of an implementation that already existed**, not a proof of
 new behaviour: the same file passes unchanged against the preceding commit.
 D025 required it before an `AB` row could be advanced, which is why it was
-added; the row still does not advance, because D025 is Proposed and the
-fractional-alignment gap it documents is still open.
+added; the row still does not advance. D025 is now Accepted, but it was
+accepted **as a documented approximation**, so the fractional-alignment gap it
+records is still open and still blocks the row.
+
+## The `ellipsize=1` normalisation
+
+D028 alternative 2, accepted after the entry originally recommended against
+it. `Layout::Button` maps an `ellipsize=` of `'1'` to `'end'`
+(`gmusicbrowser_layout.pm:3051`) while `Layout::Label` passes the value
+straight through (`:3128`), so a label written `ellipsize=1` does not
+ellipsize in GTK3. The label now follows the button.
+
+The measurement that makes this non-vacuous, and the reason the fixture looks
+the way it does:
+
+| Label | `ellipsize=` | Minimum width, normalised | Un-normalised |
+|---|---|---:|---:|
+| `Text` | `end` | 12 | 12 |
+| `Text2` | `none` | 64 | 64 |
+| `Text3` | `1` | 12 | **64** |
+
+All three carry the **identical** text `"ellipsized"`. That is what makes the
+comparison measure the option: an un-ellipsized minimum tracks the text width,
+so had `Text3` carried a different string it would have measured the string and
+passed against the un-normalised renderer. This is the same trap recorded for
+the original alignment and ellipsize assertions, and it applies to any label
+comparison.
+
+`Text5` carries `ellipsize=sideways`, a genuinely out-of-range value. It exists
+because `'1'` used to be the out-of-range case, and normalising it would
+otherwise have left the fatal-enum filter uncovered — an out-of-range enum
+nickname dies through this binding, so reaching the assertion at all proves the
+value was filtered. Both of its assertions pass on the un-normalised tree too,
+which is what makes them the **control**: the comparison discriminates rather
+than merely failing everything.
+
+Against a pristine `git archive HEAD` with only the changed test files and the
+fixture overlaid, `t/gtk4/30_Box.t` fails 3 of 81 on real Wayland and
+`t/04_Gtk4LayoutRenderer.t` fails 2 of 179 offline. Each new assertion was
+checked individually rather than by the file's failure count.
+
+No shared code changed. `make test-gtk3` was run anyway and passes.
 
 ## Shared test fixtures
 

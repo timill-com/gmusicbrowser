@@ -40,9 +40,9 @@ surface. Numeric suffixes retain the base element's behaviour.
 |---|---|
 | `Label`, `Text`, `Play`, `Quit`, `Stop`, `Next`, `Prev`, `Filler` | GTK4 in progress |
 | `minwidth=`/`minheight=` on any widget or container | GTK4 in progress |
-| Icon options (`icon=`, `stock=`) on the above | GTK4 in progress, see D023 |
-| `size=`/`relief=` on any button | GTK4 in progress, see D027 |
-| `xalign=`/`yalign=`/`ellipsize=` on `Label`/`Text` | GTK4 in progress, see D028 |
+| Icon options (`icon=`, `stock=`) on the above | GTK4 in progress, see D023/D024 (accepted) |
+| `size=`/`relief=` on any button | GTK4 in progress, see D027 (accepted) |
+| `xalign=`/`yalign=`/`ellipsize=` on `Label`/`Text` | GTK4 in progress, see D028 (accepted) |
 | `tip=` tooltip option on the above | GTK4 in progress, literal tips only |
 | `AABox`, `AASearch`, `AddLabelEntry`, `Album`, `AlbumBox`, `AlbumSearch`, `Artist`, `ArtistBox`, `ArtistPic`, `ArtistSearch`, `BContext`, `Button`, `Choose`, `ChooseRandAlbum`, `Comment`, `Connections`, `Context`, `Cover`, `Date`, `EditList`, `EditListButtons`, `EmptyList`, `Equalizer`, `EqualizerPresets`, `EqualizerPresetsSimple`, `EventBox`, `FBox`, `FLock`, `FPane`, `Filter`, `FilterBox`, `FilterLock`, `FilterPane`, `Fullscreen`, `HSeparator`, `HistItem`, `LSortItem`, `LabelTime`, `LabelToggleButtons`, `LabelVol`, `LabelsIcons`, `LayoutItem`, `Length`, `Lock`, `LockAlbum`, `LockArtist`, `LockSong`, `MainMenuItem`, `MenuItem`, `OpenBrowser`, `OpenContext`, `OpenQueue`, `PFilterItem`, `PSortItem`, `PictureBrowser`, `PlayFilter`, `PlayItem`, `PlayList`, `PlayOrderCombo`, `PlayingTime`, `Pos`, `Pref`, `Progress`, `ProgressV`, `Queue`, `QueueActions`, `QueueFilter`, `QueueItem`, `QueueList`, `Refresh`, `Repeat`, `ResetFilter`, `Scale`, `SeparatorMenuItem`, `ShuffleList`, `SimpleSearch`, `SongInfo`, `SongList`, `SongSearch`, `SongTree`, `Sort`, `Stars`, `TabbedLists`, `Time`, `TimeBar`, `TimeSlider`, `Title`, `Title_by`, `TogButton`, `ToggleButton`, `Total`, `VProgress`, `VSeparator`, `Visuals`, `Vol`, `VolBar`, `VolSlider`, `Volume`, `VolumeBar`, `VolumeIcon`, `VolumeSlider`, `Year` | Not started |
 
@@ -56,8 +56,8 @@ surface. Numeric suffixes retain the base element's behaviour.
 | `FB` | Fixed-position container | Not started |
 | `FR` | Frame | GTK4 in progress |
 | `SB` | Scroller | GTK4 in progress |
-| `AB` | Alignment wrapper | GTK4 in progress |
-| `WB` | Event wrapper | GTK4 in progress |
+| `AB` | Alignment wrapper | GTK4 in progress, see D025 (accepted) |
+| `WB` | Event wrapper | GTK4 in progress, see D026 (accepted) |
 | `@layout` | Embedded layout | Not started |
 
 The containers marked in progress are built by the GTK4 renderer and covered by
@@ -130,7 +130,7 @@ emitting `clicked`, which is the signal a real click raises, not by
 synthesising pointer input. The `group` values also differ from what a reader
 might assume: `Next` is `group => 'Next'` but `Prev` is `group => 'Recent'`.
 
-Icon sizes and relief are now implemented, as **D027** (status **Proposed**).
+Icon sizes and relief are now implemented, as **D027** (status **Accepted**).
 Legacy `Layout::Button` defaults are `relief=>'none'` and `size=>SIZE_BUTTONS`
 (`large-toolbar`), which are the default for *every* button widget rather than
 rare options, so until this increment every button the renderer built was framed
@@ -173,7 +173,7 @@ than a `%Buttons` entry and is not a button increment at all. It reuses
 D027 now covers.
 
 `Label` and `Text` now apply the legacy `Layout::Label` presentation options,
-as **D028** (status **Proposed**). `@default_options` is
+as **D028** (status **Accepted**). `@default_options` is
 `xalign => 0, yalign => .5` (`gmusicbrowser_layout.pm:3105`) while GTK4's own
 `Gtk4::Label` default is `.5`, so until this increment every `Label` and `Text`
 the renderer built was centred where GTK3 left-aligns it. GTK4 split the
@@ -182,8 +182,17 @@ fractional value, so this translation is **lossless** — the contrast with D025
 where `AB` loses a fractional alignment to a three-valued enum. `ellipsize` is
 the same Pango enum in both toolkits and passes through unchanged.
 
+One accepted parity exception rides with D028: a label written `ellipsize=1`
+now ellipsizes at the end, where GTK3 leaves it un-ellipsized. `Layout::Button`
+maps `'1'` to `'end'` (`gmusicbrowser_layout.pm:3051`) and `Layout::Label`
+does not (`:3128`); D028 alternative 2 resolves the asymmetry in favour of the
+button reading. No bundled layout is affected — all 37 `ellipsize=` uses in
+`layouts/` name `end` — so the exception is reachable only from a hand-written
+layout.
+
 Two values are filtered because an out-of-range enum is fatal through this
-binding: an `ellipsize` outside `none`/`start`/`middle`/`end`, and a
+binding: an `ellipsize` outside `none`/`start`/`middle`/`end` once the `'1'`
+shorthand is normalised, and a
 non-numeric `xalign`/`yalign`, which falls back to the legacy default as GTK3's
 own coercion does. Both stay reported through `Unhandled`.
 
@@ -225,8 +234,12 @@ request.
 
 `AB` and `WB` have no direct GTK4 equivalent, because `GtkAlignment` and
 `GtkEventBox` were both removed. `AB` becomes alignment properties on its child
-(**D025**) and `WB` becomes a plain box (**D026**). Both entries are
-**Proposed** and both rows stay at `GTK4 in progress` until they are accepted.
+(**D025**) and `WB` becomes a plain box (**D026**). Both entries are now
+**Accepted**, as documented approximations rather than closed gaps, so both
+rows deliberately stay at `GTK4 in progress`: `AB` still buckets a fractional
+alignment or scale, and `WB` still has none of the behaviour it existed to
+provide. Acceptance removed the decision gate on each row without advancing
+it.
 
 `AB` alignment is now covered by real allocations in `t/gtk4/30_Box.t`, which
 D025 requires before that row can move: four equally sized expanding `AB` slots

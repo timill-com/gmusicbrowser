@@ -471,7 +471,7 @@ and the integration Ubuntu already supplies.
 
 ## D023 — GTK4 icons use themed icon names, not a stock factory
 
-Status: **Proposed**
+Status: **Accepted**
 
 Gate: before the GTK4 renderer grows icon-bearing widgets
 
@@ -523,13 +523,20 @@ refresh of the `gmb-*` artwork is a separate proposal after parity.
 
 Evidence or removal condition:
 
+Accepted 2026-09-07, together with D024, since both concern icon resolution.
+No code change was required. Alternative 2 — replacing the `gmb-*` names with
+freedesktop equivalents — remains deferred and was explicitly left deferred on
+acceptance: those 28 files back gmusicbrowser's own "Icon theme :" preference
+at `gmusicbrowser.pl:7023`, with three packs in `pix/`, so proposing the
+mapping needs its own entry.
+
 Covered by renderer tests once icon-bearing widgets exist. Revisit if a bundled
 icon fails to resolve on a supported desktop, or if packaging cannot ship
 `pix/` on the icon search path.
 
 ## D024 — Icon resolution falls back to the `-symbolic` variant
 
-Status: **Proposed**
+Status: **Accepted**
 
 Gate: before the GTK4 renderer grows more icon-bearing widgets
 
@@ -594,6 +601,11 @@ assertions fail, returning `application-exit` and `view-refresh`. Revisit if a
 supported theme is found where the suffixed name is worse than the unsuffixed
 one.
 
+Accepted 2026-09-07, together with D023. No code change was required. The
+production evidence below was decisive: without this fallback the two
+most-used unported buttons in the bundled layouts render as text labels on
+stock GNOME, which D022 makes a required target.
+
 Production evidence added on 2026-09-07, when the `Next` and `Prev` widgets
 were rendered: they are the first widgets in the port that actually depend on
 this fallback. Their defaults are `gtk-media-next` and `gtk-media-previous`,
@@ -608,7 +620,7 @@ either spelling so they do not pin one theme's convention.
 
 ## D025 — `AB` becomes alignment properties on its child
 
-Status: **Proposed**
+Status: **Accepted**
 
 Gate: before any `AB` row is advanced past `GTK4 in progress`
 
@@ -668,15 +680,24 @@ parity for the layout language.
 
 Evidence or removal condition:
 
+Accepted 2026-09-07 **as a documented approximation**. The fractional
+alignment/scale gap was neither closed nor waived: the user's call was to
+accept the translation with the gap recorded, so the `AB` row deliberately
+stays at `GTK4 in progress` and alternative 1 stays deferred rather than
+promoted. Acceptance removes the decision gate on the row; it does not
+advance it.
+
 Construction and option handling are covered in `t/04_Gtk4LayoutRenderer.t`
-against in-process doubles. There is no real-Wayland allocation test for `AB`
-alignment yet; that is required before the row moves. Revisit if a user layout is
+against in-process doubles. Real-Wayland allocation coverage for `AB`
+alignment now exists in `t/gtk4/30_Box.t`, but it covers the implementation
+that already existed rather than proving new behaviour, and the fractional gap
+above is what still blocks the row. Revisit if a user layout is
 found relying on a fractional alignment or scale, which would promote
 alternative 1 from deferred to required.
 
 ## D026 — `WB` becomes a plain box, and its purpose is not ported
 
-Status: **Proposed**
+Status: **Accepted**
 
 Gate: before any `WB` row is advanced past `GTK4 in progress`
 
@@ -732,6 +753,13 @@ until then the container is a shape with none of its behaviour.
 
 Evidence or removal condition:
 
+Accepted 2026-09-07 **as a documented approximation**, with alternative 2
+left deferred rather than decided: folding `hover_layout` into `WB` needs a
+popup-window design that does not exist yet. The `WB` row therefore stays at
+`GTK4 in progress`, because until `hover_layout` is ported the container is a
+shape with none of its behaviour. Acceptance removes the decision gate on the
+row; it does not advance it.
+
 Construction is covered in `t/04_Gtk4LayoutRenderer.t`. Revisit when
 `hover_layout` is ported: that is the point at which alternative 2 must be
 accepted or rejected, and at which `WB` either gains real behaviour or is
@@ -739,7 +767,7 @@ formally recorded as a compatibility shim with none.
 
 ## D027 — Legacy icon `size=` becomes a pixel size, and `relief=` becomes has-frame
 
-Status: **Proposed**
+Status: **Accepted**
 
 Gate: before any button row is advanced past `GTK4 in progress`
 
@@ -807,6 +835,9 @@ Alternatives:
    `set_has_frame(0)`. Both work; `set_has_frame` was chosen because it is the
    documented property replacing `set_relief` rather than a style-class
    convention, and it is readable back through `get_has_frame` for testing.
+   **Rejected on acceptance (2026-09-07):** the user confirmed
+   `set_has_frame`. The `flat` style class would also entangle button relief
+   with the still-undecided `font=`/`color=` CSS work.
 
 Consequences:
 
@@ -830,6 +861,12 @@ belong in this mapping.
 
 Evidence or removal condition:
 
+Accepted 2026-09-07 as implemented, with `set_has_frame` confirmed over
+alternative 3 and no code change required. This unblocks the
+`size=`/`relief=` parity row from its decision gate; the row itself stays at
+`GTK4 in progress`, because input, focus, and accessibility comparison against
+GTK3 are still missing.
+
 `t/gtk4/40_Icons.t` asserts the pixel size and the measured natural width for
 all six mapped names against a real theme on Wayland, plus the unset case for
 an unmapped name and both relief states. Run against the previous renderer it
@@ -846,7 +883,7 @@ pins those three. This is the same class of trap as the recorded
 
 ## D028 — `Layout::Label` alignment and ellipsize port unchanged
 
-Status: **Proposed**
+Status: **Accepted**
 
 Gate: before any `Layout::Label` row is advanced past `GTK4 in progress`
 
@@ -880,10 +917,8 @@ same fractional value that GTK3 accepted is preserved.
 Two values are filtered rather than passed on, because an out-of-range value
 is a **fatal** enum error through this binding rather than a warning:
 
-- An `ellipsize` outside `none`/`start`/`middle`/`end`. Note
-  `Layout::Button` maps `'1'` to `'end'` (`:3051`) but `Layout::Label`
-  deliberately does not, so `ellipsize=1` on a label is not silently
-  upgraded.
+- An `ellipsize` outside `none`/`start`/`middle`/`end`, once the `'1'`
+  shorthand below has been normalised.
 - A non-numeric `xalign`/`yalign`. GTK3 accepts it with a Perl
   `isn't numeric` warning and coerces it to 0, which is verified, not
   assumed; since the legacy `xalign` default is also 0 the renderer falls back
@@ -897,10 +932,24 @@ Alternatives:
    Rejected: it would bucket a value the label can represent exactly, and
    `halign` positions the whole widget in its parent rather than the text
    inside the widget, which is a different effect.
-2. Follow `Layout::Button` and map `ellipsize=1` to `end`. Rejected: it would
-   change behaviour relative to GTK3, where a label with `ellipsize=1` does
-   not ellipsize. The asymmetry between the two legacy classes is real and is
-   preserved.
+2. Follow `Layout::Button` and map `ellipsize=1` to `end`. **Accepted
+   2026-09-07**, reversing this entry's original recommendation, which was to
+   preserve the asymmetry. The user's call was to normalise.
+
+   The asymmetry between the two legacy classes is real: `Layout::Button` maps
+   `'1'` to `'end'` (`:3051`) and `Layout::Label` passes the value straight to
+   `set_ellipsize` (`:3128`), so a label written `ellipsize=1` does not
+   ellipsize in GTK3. Normalising the label to the button's reading is
+   therefore a **deliberate parity exception**, not a translation, and it is
+   recorded as one rather than as a bug fix.
+
+   What makes the exception cheap is that it is unreachable from anything the
+   project ships. All **37** `ellipsize=` uses across `layouts/` name `end`;
+   isolated with `[(,]ellipsize=` so `lmarkup`-style prefixes and
+   `minsize=` cannot inflate the count. Not one bundled layout uses the `'1'`
+   form, so no shipped layout changes appearance. The change is reachable only
+   from a hand-written layout, where a user writing `ellipsize=1` plainly
+   intends ellipsizing and GTK3 silently gave them none.
 3. Also port `markup` (76 uses), `font`, `color`, and `minsize`. Deferred, not
    rejected. `markup` runs through `::UsedFields` and per-song substitution,
    `font` and `color` moved from widget overrides to CSS in GTK4, and
@@ -910,9 +959,10 @@ Alternatives:
 
 Consequences:
 
-`Label` and `Text` now render their text where GTK3 renders it. No
-layout-visible option name changes, so the D002 compatibility surface is
-untouched, and nothing about the text itself changes — this stays inside D013
+`Label` and `Text` now render their text where GTK3 renders it, with one
+accepted exception: a label written `ellipsize=1` ellipsizes at the end where
+GTK3 leaves it un-ellipsized. No layout-visible option name changes, so the
+D002 compatibility surface is untouched, and nothing about the text itself changes — this stays inside D013
 on the same ground as D023, D024, and D027: it applies a default GTK4 does not
 share and replaces a deprecated setter.
 
@@ -931,6 +981,23 @@ lowers the label's minimum width. `t/04_Gtk4LayoutRenderer.t` covers the
 fractional values, the defaults, and both filtered cases. Run against the
 previous renderer, `t/gtk4/30_Box.t` fails 7 of 78 and
 `t/04_Gtk4LayoutRenderer.t` fails 10 of 177.
+
+Accepted 2026-09-07. The alignment and `ellipsize` translation landed
+unchanged; alternative 2 was reversed in the same pass and is covered by its
+own assertions.
+
+Coverage for the normalisation, added when it was accepted:
+`t/gtk4/30_Box.t` measures a third label carrying **identical text** to the
+`ellipsize=end` and `ellipsize=none` labels and asserts its minimum width
+equals the ellipsized one. Against the un-normalised renderer that label
+measures **64px**, the full text width, against **12px** ellipsized, so the
+assertion turns on the option rather than on the string. A fourth label
+carries a genuinely out-of-range `ellipsize=sideways`, which keeps the
+fatal-enum filter covered now that `'1'` is no longer out of range, and both
+its assertions pass on the un-normalised tree as well — so the comparison
+discriminates rather than merely failing everything. Run against the
+un-normalised renderer, `t/gtk4/30_Box.t` fails 3 of 81 and
+`t/04_Gtk4LayoutRenderer.t` fails 2 of 179.
 
 Two things that make these assertions non-vacuous, both found by running them
 against pristine:
