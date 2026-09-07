@@ -112,7 +112,15 @@ use lib '.';
 }
 {	package Gtk4::Label;
 	our @ISA=('Gtk4::Widget::Double');
-	sub new { bless {label=>$_[1]},$_[0] }
+	# real GTK4 centres a label by default and does not ellipsize, which is what
+	# makes the legacy xalign=>0 default observable
+	sub new { bless {label=>$_[1],xalign=>0.5,yalign=>0.5,ellipsize=>'none'},$_[0] }
+	sub set_xalign { $_[0]{xalign}=$_[1] }
+	sub get_xalign { $_[0]{xalign} }
+	sub set_yalign { $_[0]{yalign}=$_[1] }
+	sub get_yalign { $_[0]{yalign} }
+	sub set_ellipsize { $_[0]{ellipsize}=$_[1] }
+	sub get_ellipsize { $_[0]{ellipsize} }
 }
 {	package Gtk4::Image;
 	our @ISA=('Gtk4::Widget::Double');
@@ -481,6 +489,44 @@ is_deeply([$zrenderer->Widget('Text')->get_size_request],[-1,-1],'a widget with 
 # and containers, matching the second legacy call site
 is_deeply([$zroot->get_size_request],[320,-1],'a container honours minwidth');
 is_deeply([$zrenderer->Widget('HBfillers')->get_size_request],[-1,-1],'a container with no size option is left unrequested');
+
+# The legacy Layout::Label presentation options. @default_options is
+# (xalign=>0, yalign=>.5), so a Label naming neither is left-aligned in GTK3
+# while GTK4's own Label default is centred.
+{	my $lfixture=File::Spec->catfile('t','layouts','labels.layout');
+	my $lcatalog=Layout::Parser::ParseFiles(files=>[$lfixture]);
+	is(scalar @{$lcatalog->{diagnostics}},0,'labels fixture parses without diagnostics');
+	my $lrenderer=Layout::Renderer::Gtk4->new
+	(	catalog=>$lcatalog,
+		frontend=>$frontend,
+		labels=>GMB::Test::RendererLabels::labels(),
+	);
+	$lrenderer->Render('gtk4 labels');
+
+	is($lrenderer->Widget('Label')->get_xalign,0,'a Label with no xalign takes the legacy left alignment');
+	is($lrenderer->Widget('Label')->get_yalign,0.5,'a Label with no yalign takes the legacy centre');
+	is($lrenderer->Widget('Label2')->get_xalign,0,'xalign=0 is left');
+	is($lrenderer->Widget('Label3')->get_xalign,0.5,'xalign=.5 is centre');
+	is($lrenderer->Widget('Label4')->get_xalign,1,'xalign=1 is right');
+	is($lrenderer->Widget('Label5')->get_yalign,0,'yalign=0 is top');
+	# GTK4 set_xalign takes the same fractional value the deprecated GTK3
+	# set_alignment did, so unlike AB's halign enum nothing is bucketed
+	is($lrenderer->Widget('Label6')->get_xalign,0.25,'a fractional xalign is preserved exactly');
+	is($lrenderer->Widget('Label6')->get_yalign,0.75,'a fractional yalign is preserved exactly');
+
+	# ellipsize is the same Pango enum in both toolkits
+	is($lrenderer->Widget('Text')->get_ellipsize,'end','ellipsize=end passes through');
+	is($lrenderer->Widget('Text2')->get_ellipsize,'none','ellipsize=none passes through');
+	# Layout::Label does not map '1' to 'end' the way Layout::Button does, and an
+	# out-of-range value is fatal through this binding, so it must not be passed on
+	is($lrenderer->Widget('Text3')->get_ellipsize,'none','an out-of-range ellipsize is left alone');
+	is_deeply($lrenderer->Unhandled('Text3'),['ellipsize'],'an out-of-range ellipsize is reported');
+	is($lrenderer->Widget('Text4')->get_xalign,0,'a non-numeric xalign falls back to the legacy default');
+	is_deeply($lrenderer->Unhandled('Text4'),['xalign'],'a non-numeric xalign is reported');
+	is($lrenderer->Unhandled('Label6'),undef,'handled alignment options are not reported');
+	is($lrenderer->Unhandled('Text'),undef,'a handled ellipsize is not reported');
+	$lrenderer->Destroy;
+}
 
 # The fixture must hand out a fresh copy, or one test mutating its labels would
 # change another's. A %Buttons entry with no fixture label needs no assertion:

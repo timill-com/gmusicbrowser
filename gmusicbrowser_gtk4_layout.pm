@@ -88,6 +88,18 @@ my %ButtonDefaults= (relief=>'none', size=>'large-toolbar');
 # for every widget by _ApplyCommonOptions, so they are not reported here.
 my %ButtonHandled= map {$_=>1} qw/icon stock text tip size relief minwidth minheight/;
 
+# The same for a Layout::Label widget. 'markup' is deliberately absent: it goes
+# through ::UsedFields and per-song substitution, so it belongs with a real
+# Layout::Label port rather than with these presentation options. So are
+# 'font'/'color', which GTK4 moved from widget overrides to CSS, and 'minsize'/
+# 'expand_max', which drive the legacy scrolling-label machinery.
+my %LabelHandled= map {$_=>1} qw/text xalign yalign ellipsize minwidth minheight/;
+
+# The legacy Layout::Label defaults (gmusicbrowser_layout.pm:3105). GTK4's own
+# Label default is .5/.5, so these are not redundant.
+my %LabelDefaults= (xalign=>0, yalign=>.5);
+my %Ellipsize= map {$_=>1} qw/none start middle end/;
+
 # the bundled aliases that have no file of their own, from %IconsFallbacks in
 # gmusicbrowser.pl
 my %IconFallbacks=
@@ -422,6 +434,7 @@ sub _CreateWidget
 	{	my $text=$node->{options}{values}{text};
 		$text='' unless defined $text;
 		$widget=Gtk4::Label->new($text);
+		$self->_ApplyLabelOptions($widget,$node);
 	}
 	elsif ($element eq 'Filler')
 	{	# an empty box, as in legacy Gtk3::HBox->new; it exists to take up space
@@ -477,6 +490,42 @@ sub _ApplyCommonOptions
 	$minwidth=  $values->{minwidth}  || $minwidth;
 	$minheight= $values->{minheight} || $minheight;
 	$widget->set_size_request($minwidth,$minheight);
+}
+
+# The legacy Layout::Label options that carry over without song-field state.
+#
+# xalign/yalign: legacy @default_options is (xalign=>0, yalign=>.5)
+# (gmusicbrowser_layout.pm:3105), applied through the deprecated
+# Gtk3::Label::set_alignment. GTK4 splits that into set_xalign/set_yalign, which
+# take the same fractional value, so unlike AB's halign enum (D025) nothing is
+# bucketed. GTK4's own default is .5/.5, so a Label built without this is
+# centred where GTK3 left-aligns it.
+#
+# ellipsize: the same Pango enum in both toolkits, passed through unchanged as
+# legacy Layout::Label does (:3127). Note Layout::Button maps '1' to 'end'
+# (:3051) but Layout::Label does not, and an out-of-range value is fatal through
+# this binding, so anything but a Pango mode is reported rather than passed on.
+sub _ApplyLabelOptions
+{	my ($self,$widget,$node)=@_;
+	my $values=$node->{options}{values};
+	my %opt=(%LabelDefaults, map {($_=>$values->{$_})}
+		grep defined $values->{$_}, qw/xalign yalign/);
+	# A non-numeric alignment would be a binding error. GTK3 coerces it to 0
+	# silently, so falling back to the legacy default keeps the widget usable
+	# and still leaves the option reported.
+	for my $key (qw/xalign yalign/)
+	{	$opt{$key}=$LabelDefaults{$key} unless $opt{$key}=~m/^[0-9]*\.?[0-9]+$/;
+		my $method="set_$key";
+		$widget->$method($opt{$key}+0);
+	}
+	my $ellipsize=$values->{ellipsize};
+	$widget->set_ellipsize($ellipsize)
+		if defined $ellipsize && $Ellipsize{$ellipsize};
+	my @ignored=grep { !$LabelHandled{$_}
+		|| ($_ eq 'ellipsize' && !$Ellipsize{$values->{$_} || ''})
+		|| ($_=~m/^[xy]align$/ && $values->{$_}!~m/^[0-9]*\.?[0-9]+$/) }
+		@{$node->{options}{order}};
+	$self->{unhandled}{$node->{name}}=\@ignored if @ignored;
 }
 
 # The legacy relief= and size= options, which apply to every Layout::Button

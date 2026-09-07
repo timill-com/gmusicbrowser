@@ -1,0 +1,4 @@
+[gtk4 labels]
+Type=G
+VBroot= Label(text="same") Label2(text="same",xalign=0) Label3(text="same",xalign=.5) Label4(text="same",xalign=1) VBmore
+VBmore= Label5(text="top",yalign=0) Label6(text="frac",xalign=0.25,yalign=0.75) Text(text="ellipsized",ellipsize=end) Text2(text="ellipsized",ellipsize=none) Text3(text="bad",ellipsize=1) Text4(text="odd",xalign=left)

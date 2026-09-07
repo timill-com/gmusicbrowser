@@ -283,4 +283,65 @@ _drain();
 	_drain();
 }
 
+# Layout::Label xalign/yalign and ellipsize as real rendering, not property
+# read-back. @default_options is (xalign=>0, yalign=>.5), while GTK4's own Label
+# default is centred, so a Label built without this is misaligned.
+{	my $lfixture=File::Spec->catfile('t','layouts','labels.layout');
+	my $lcatalog=Layout::Parser::ParseFiles(files=>[$lfixture]);
+	is(scalar @{$lcatalog->{diagnostics}},0,'labels fixture parses without diagnostics');
+	my $lrenderer=Layout::Renderer::Gtk4->new
+	(	catalog=>$lcatalog,
+		frontend=>$frontend,
+		labels=>GMB::Test::RendererLabels::labels(),
+	);
+	my $lroot=$lrenderer->Render('gtk4 labels');
+	$lroot->set_direction('ltr');
+	my $lwindow=Gtk4::Window->new;
+	$lwindow->set_default_size(400,300);
+	$lwindow->set_child($lroot);
+	$lwindow->present;
+	ok(_wait_for_window($lwindow),'GTK4 window mapped before label assertions');
+
+	# get_layout_offsets is where the text actually lands, so it shows the
+	# alignment took effect rather than merely being stored on the widget
+	# the labels must be wider than their text before alignment moves anything
+	$lrenderer->Widget($_)->set_size_request(200,-1) for qw/Label Label2 Label3 Label4/;
+	_drain();
+	my %off;
+	for my $name (qw/Label Label2 Label3 Label4/)
+	{	my $w=$lrenderer->Widget($name);
+		my ($x,$y)=$w->get_layout_offsets;
+		$off{$name}={x=>$x, width=>$w->get_width};
+	}
+	# All four carry identical text, so a difference in offset can only come
+	# from the alignment. With differing text the centred offsets differ by a
+	# few pixels on their own and every comparison here passes vacuously.
+	cmp_ok($off{Label2}{width},'>',40,'the label slot is wide enough for alignment to be observable');
+	is($off{Label2}{x},0,'xalign=0 renders its text at the near edge');
+	cmp_ok($off{Label4}{x},'>',$off{Label3}{x},'xalign=1 renders further right than xalign=.5');
+	cmp_ok($off{Label3}{x},'>',$off{Label2}{x},'xalign=.5 renders further right than xalign=0');
+	cmp_ok(abs($off{Label3}{x}*2-$off{Label4}{x}),'<=',1,
+		'xalign=.5 renders at half the xalign=1 offset');
+	# the legacy default must match xalign=0, not GTK4's centred default
+	is($off{Label}{x},$off{Label2}{x},
+		'a Label with no xalign renders where xalign=0 does, not centred');
+	cmp_ok($off{Label3}{x}-$off{Label}{x},'>',10,
+		'the legacy default is far from centred, not merely unequal to it');
+
+	# ellipsize=end lets the label shrink below its own text width; that reduced
+	# minimum is the real effect. Both labels carry identical text so the
+	# comparison isolates the option rather than measuring two different strings.
+	my ($cmin)=$lrenderer->Widget('Text')->measure('horizontal',-1);
+	my ($kmin)=$lrenderer->Widget('Text2')->measure('horizontal',-1);
+	cmp_ok($cmin,'<',$kmin,'ellipsize=end lowers the minimum width below the un-ellipsized one');
+	# an out-of-range ellipsize would be a fatal enum error through this binding,
+	# so reaching this line at all proves it was filtered rather than passed on
+	is($lrenderer->Widget('Text3')->get_ellipsize,'none','an out-of-range ellipsize is left at the default');
+	is_deeply($lrenderer->Unhandled('Text3'),['ellipsize'],'an out-of-range ellipsize is reported');
+
+	$lrenderer->Destroy;
+	$lwindow->destroy;
+	_drain();
+}
+
 done_testing;
