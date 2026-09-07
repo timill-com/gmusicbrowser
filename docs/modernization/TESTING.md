@@ -10,12 +10,13 @@ make test-modernization
 
 This runs the neutral layout parser, frontend contract and lifecycle, legacy
 adapter and lifecycle integration, and GTK4 renderer contract tests. On
-2026-09-07 it reported 364 executed assertions passed and no skips. Running
+2026-09-07 it reported 395 executed assertions passed and no skips. Running
 totals: 269 at the start of the previous session, 298 after `Next`/`Prev`, 315
 after `Filler`, 317 after the shared labels fixture, 325 after the
 `size=`/`relief=` increment, 342 after label alignment/ellipsize, 344 after the
-`ellipsize=1` normalisation, 364 after the `AB` constraint layout. The skip
-count was read from `prove -v`, not assumed. The
+`ellipsize=1` normalisation, 364 after the `AB` constraint layout, 395 after
+the label `font=`/`color=` CSS. The skip count was read from `prove -v`, not
+assumed. The
 renderer test uses small in-process GTK doubles; it proves the
 parser/renderer/command wiring without claiming that a real GTK4 binding or
 display passed.
@@ -75,14 +76,15 @@ before [move-handle](https://docs.gtk.org/gtk4/signal.Paned.move-handle.html).
 `t/gtk4/30_Box.t` adds real `HB`/`VB` packing geometry to the runner, plus the
 `AB` and label alignment coverage. On 2026-09-07, after the `AB` constraint
 layout, the full
-`make test-gtk4` run reported 287 TAP results: 281 executed assertions passed
+`make test-gtk4` run reported 304 TAP results: 298 executed assertions passed
 and the same six feasibility probes were skipped, 0 failures. The skips were
 counted from `prove -v` and are the same six M1 probes as before. Running
 totals for the same command: 173 results before `Next`/`Prev`, 184 after it,
 202 after `Filler`, 216 after the `AB` alignment coverage, 246 after
 `size=`/`relief=`, 258 after label alignment, 261 after the `ellipsize=1`
-normalisation, 287 after the `AB` constraint layout. Per file: 18 binding,
-which is where all six skips live, 4 proof-of-life, 84 pane, 107 box, 74 icon.
+normalisation, 287 after the `AB` constraint layout, 304 after the label
+`font=`/`color=` CSS. Per file: 18 binding, which is where all six skips live,
+4 proof-of-life, 84 pane, 124 box, 74 icon.
 
 The `AB` constraint-layout assertions are behaviour, not construction. Against
 the previous renderer, `t/gtk4/30_Box.t` fails **11 of 107** on real Wayland
@@ -108,6 +110,38 @@ were read with a `Gtk4::Label`/`Gtk3::Label` child, not a `Gtk4::Button`: a
 button given `set_size_request(40,24)` measures 26px wide at a 7px inset from
 its own theme CSS, which offsets every row of a geometry table uniformly and
 looks like a layout bug. See D006.
+
+The label `font=`/`color=` assertions (D031) are behaviour for the font and the
+explicit-colour paths, and construction for the grey path. Against the previous
+renderer, `t/gtk4/30_Box.t` fails **8 of 124** on real Wayland and
+`t/04_Gtk4LayoutRenderer.t` fails **14 of 230** offline. The pristine failure
+values were confirmed to be the right reason: `21 > 21` for the font
+measurement, because the previous renderer draws every label at the theme size,
+and `got rgb(46,52,54) / expected rgb(255,255,255)` for the explicit colour.
+
+Three things to know before extending them:
+
+- **The offline comparison needs stubs in the pristine copy.** `_IsGrey`,
+  `_ColorRule`, `_FontRule`, and the `LEGACY_FONT_BASELINE` constant must be
+  added, or the helper block dies before its assertions are reached and hides
+  them. This is the same "add just enough to reach the assertions" step the
+  `Filler` increment needed.
+- **`t/04_Gtk4LayoutRenderer.t` deliberately does not double
+  `Gtk4::Gdk::Display`.** The absence of a display is what makes `_IconTheme`
+  return undef and every icon fall back to text, so supplying one to make the
+  CSS provider work offline would quietly delete that coverage. It also means a
+  generated `font=`/`color=` rule cannot be installed offline and is reported
+  through `Unhandled` there, with the rendering proved on real Wayland instead.
+  `dim-label` is the exception: it ships with GTK4, so it applies with no
+  provider and is the one styling path the offline file can assert.
+- **The theme colour differs between environments.** It is near-white on this
+  desktop and `rgb(46,52,54)` inside `tools/run-gtk4-smoke`, whose Adwaita
+  theme and unset session bus are already recorded. Compare against the
+  measured theme colour rather than hard-coding a value.
+
+A `font-size` assertion also only discriminates away from the theme size: with
+the desktop at `Roboto 10`, a `10pt` rule measures identically to no rule at
+all. 8, 9, 11, 12, 14, 16, 20, and 30pt all measure distinctly.
 They read allocated child offsets with
 [translate_coordinates](https://docs.gtk.org/gtk4/method.Widget.translate_coordinates.html);
 `compute_bounds` and `compute_point` are unusable through this binding, which

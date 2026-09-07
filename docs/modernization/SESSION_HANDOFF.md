@@ -1,10 +1,18 @@
 # Session handoff
 
 Status: the tree is clean. This session recorded the user's standing
-native-mechanism policy as **D029** and then closed `AB`'s fractional
-alignment gap through a `Gtk4::ConstraintLayout`, recorded as **D030**, which
-supersedes the fractional half of the Accepted D025. Two commits of code and
-documentation plus this one.
+native-mechanism policy as **D029**, closed `AB`'s fractional alignment gap
+through a `Gtk4::ConstraintLayout` (**D030**, superseding the fractional half
+of the Accepted D025), and applied the legacy label `font=`/`color=` options
+through a `GtkCssProvider` (**D031**).
+
+**Read D031 before touching presentation options.** It is the first place
+where D002 fidelity and the goal of letting the desktop theme through actually
+conflicted, and the user chose the theme: `font=20` becomes `200%` of the
+desktop font rather than 20 absolute points. The measurement that forced the
+choice is that **the OS theme font and colours already reach the renderer's
+labels with no code at all**, so any styling the renderer adds is an override
+of the theme, not a gain.
 
 The decision backlog remains cleared: D023, D024, D025, D026, D027, and D028
 are all **Accepted**.
@@ -29,6 +37,98 @@ Last session: 2026-09-07. Branch `gtk4-alpha`.
 
 Read `MODERNIZATION.md` and `AGENTS.md` first. This file only records where the
 previous session stopped and what the next one should verify before continuing.
+
+## This session's increment: label `font=` and `color=` through CSS
+
+`Layout::Label` applies `font=` with `modify_font` and `color=` with
+`override_color` (`gmusicbrowser_layout.pm:3118-3122`). GTK4 removed both
+per-widget overrides, so each becomes a style class on one
+`Gtk4::CssProvider` the renderer installs on the display and releases in
+`Destroy`. Recorded as **D031**.
+
+**The finding that shaped the whole design: the OS theme already works.** The
+desktop font is `Roboto 10`, an unstyled `Gtk4::Label` measures 19x17, and
+GTK3 on the same host reports the same font and the same 19x17. So the
+renderer already inherits the desktop's font and colours; `font=`/`color=`
+are overrides of that, which is the opposite of the framing the previous
+handoff implied.
+
+**`font=` is theme-relative.** A legacy `font=20` becomes `200%`, fixed
+against the 10pt GTK3 baseline the bundled layouts were authored against:
+
+| desktop font | unstyled | `font=20` | `font=8` |
+|---|---:|---:|---:|
+| Roboto 10 | 17px | 32px | 13px |
+| Roboto 16 | 26px | 51px | 21px |
+| Roboto 8 | 13px | 26px | 11px |
+
+Identical to GTK3 at the baseline, a deliberate parity exception away from it.
+
+**I got this wrong once and had to correct it mid-increment, which is the most
+transferable part.** The first implementation derived the percentage from the
+*live* theme size. That cancels out — `20/16 * 16pt` is `20pt` again — so it
+reproduced the absolute legacy size exactly and the desktop font never reached
+the widget. It looked theme-aware because the emitted class changed (`200%`
+then `125%`) while the rendered size did not. **A ratio only follows the theme
+if it is fixed against a constant baseline.** Check a "relative" translation by
+varying the theme and reading the *rendered* size, never the emitted rule.
+
+**`color=grey` becomes `dim-label`**, GTK4's de-emphasis class, which follows
+the theme and its dark variant; every bundled `color=` use is a grey. A
+non-grey is emitted literally. A grey is a named grey or a hex with equal
+channels, so `#ccc` and `#888888` classify together.
+
+Four things worth carrying forward:
+
+- **`dim-label` has no observable.** It styles by opacity at draw time, so
+  `get_color` returns the unmodified theme colour and `get_opacity` returns 1.
+  `has_css_class` is the only check, which makes the grey path construction
+  coverage. An explicit colour *is* readable through
+  `get_style_context->get_color`.
+- **A CSS rule body needs a trailing semicolon** or GTK warns `Expected ';' at
+  end of block` for every rule — while still applying it, so the warning is
+  the only symptom. `load_from_data` also needs the byte length as a second
+  argument.
+- **A `font-size` assertion only discriminates away from the theme size.** At
+  `Roboto 10`, a `10pt` rule measures identically to no rule at all. Same
+  class of trap as the 16px icon default.
+- **Do not double `Gtk4::Gdk::Display` in the offline file.** The absence of a
+  display is what makes `_IconTheme` return undef and every icon fall back to
+  text. I added the double to make the CSS provider work offline, noticed it
+  had quietly weakened that invariant, and removed it again. The offline file
+  now asserts the *reporting* path instead, with rendering proved on Wayland.
+
+### Verification for this increment
+
+- `t/gtk4/30_Box.t` fails **8 of 124** against pristine on real Wayland;
+  `t/04_Gtk4LayoutRenderer.t` fails **14 of 230** offline.
+- Pristine failure values confirmed as the right reason: `21 > 21` for the
+  font measurement, because pristine draws every label at the theme size, and
+  `got rgb(46,52,54) / expected rgb(255,255,255)` for the explicit colour.
+- The offline comparison needs `_IsGrey`, `_ColorRule`, `_FontRule`, and the
+  baseline constant stubbed into the pristine copy, or the helper block dies
+  before its assertions run.
+- Controls pass on both trees: every "is not a grey" and "is refused"
+  assertion, `a label with no font= gets no font class`, `an unparseable font=
+  leaves the theme font alone`, and the three `Unhandled` assertions for
+  values pristine also refuses.
+- No shared code changed. `make test-gtk3` was run anyway and passes.
+
+### What this increment does NOT cover
+
+`DefaultFont`/`DefaultFontColor` — the layout-wide globals read at
+`gmusicbrowser_layout.pm:971`, which `desktop.layout` sets to `white` at three
+scopes and `fullscreen.layout` sets to `20`. So a `Text` in `desktop.layout`
+gets its explicit `color=grey` but not the inherited `white`. That is D031
+alternative 5, deferred as **layout-level option inheritance**, which is a
+different unit from a widget option and is the natural follow-up here.
+
+Also note the four bundled `font=` uses are all on
+`Title`/`Artist`/`Album`/`Date`, none of which the renderer builds yet, so
+`font=` is exercised only by the fixture until those land. `color=` on `Text`
+is reachable today. And `shimmer.layout:132`'s `color='#ccc'` is a
+**drawing-layer** option, not a label option — do not count it as a fifth
+label use.
 
 ## This session's increment: `AB` fractional alignment via a constraint layout
 
@@ -308,6 +408,8 @@ Everything is committed. For the number of commits past `master`, run
 `git rev-list --count master..HEAD` rather than trusting a figure here.
 Newest first:
 
+	c97247b gtk4: apply the legacy label font and color options through CSS
+	6e33759 docs: record D030 and the AB constraint layout results
 	fe65c9c gtk4: render a fractional AB alignment through a constraint layout
 	9a12acc docs: record the native-mechanism policy and the layout vfunc finding
 	adde70b gtk4: normalise the label ellipsize=1 shorthand to end
@@ -477,8 +579,9 @@ binding, and both stay reported through `Unhandled`:
   since the legacy `xalign` default is also 0, falling back to the default
   reaches the same rendering.
 
-`markup` (76 uses), `font`, `color`, and `minsize`/`expand_max` are deliberately
-out of scope; see D028 alternative 3.
+`markup` (76 uses) and `minsize`/`expand_max` are deliberately out of scope
+there; see D028 alternative 3. `font` and `color` were listed with them at the
+time and have since been implemented under **D031**.
 
 ### Two of the new assertions were vacuous, and pristine caught it
 
@@ -550,8 +653,10 @@ are left-aligned rather than centred, and `xalign`/`yalign`/`ellipsize` are
 applied. See D028, now Accepted. A label's `ellipsize=1` is normalised to
 `'end'` under its alternative 2, which is the one accepted parity exception in
 the renderer: GTK3 leaves such a label un-ellipsized. `%LabelHandled` covers `text`, `xalign`, `yalign`,
-`ellipsize`, `minwidth`, and `minheight`; `markup`, `font`, `color`, `minsize`,
-and `expand_max` stay reported.
+`ellipsize`, `minwidth`, `minheight`, `font`, and `color`; `markup`,
+`minsize`, and `expand_max` stay reported. `font=`/`color=` land through a
+`GtkCssProvider` under D031, with `font=` expressed as a ratio of the desktop
+font rather than as absolute points.
 
 Both increments follow the same pattern, and it is worth looking for more of
 it: a legacy `@default_options` value whose GTK4 counterpart differs is a
@@ -1014,20 +1119,21 @@ Commands that were actually run and passed this session:
 	make test-gtk3
 	git diff --check
 
-`make test-modernization`: **364** executed assertions passed, no skips.
+`make test-modernization`: **395** executed assertions passed, no skips.
 Running totals: 269 two sessions ago, 298 after `Next`/`Prev`, 315 after
 `Filler`, 317 after the labels fixture, 325 after `size=`/`relief=`, 342 after
 label alignment, 344 after the `ellipsize=1` normalisation, 364 after the `AB`
-constraint layout. The skip count was read from `prove -v`, not assumed.
+constraint layout, 395 after the label `font=`/`color=` CSS. The skip count was
+read from `prove -v`, not assumed.
 
-`make test-gtk4` on the real Wayland connection: **287** TAP results,
-comprising **281 executed assertions passed** and the same six pre-existing M1
+`make test-gtk4` on the real Wayland connection: **304** TAP results,
+comprising **298 executed assertions passed** and the same six pre-existing M1
 feasibility probes skipped, 0 failures. Per file: 18 binding (which is where
-all six skips live), 4 proof-of-life, 84 pane, 107 box, 74 icon. Running totals
+all six skips live), 4 proof-of-life, 84 pane, 124 box, 74 icon. Running totals
 for the same command: 173 before `Next`/`Prev`, 184 after it, 202 after
 `Filler`, 216 after the `AB` coverage, 246 after `size=`/`relief=`, 258 after
-label alignment, 261 after the `ellipsize=1` normalisation, 287 now. Do not
-restate this as 281 passing assertions. The six skips were counted by copying the runner to
+label alignment, 261 after the `ellipsize=1` normalisation, 287 after the `AB`
+constraint layout, 304 now. Do not restate this as 298 passing assertions. The six skips were counted by copying the runner to
 `tools/.verbose-smoke-tmp`, switching `prove` to `-v`, and grepping
 `^ok [0-9]+ # skip` — six matches, all `BLOCKED:` M1 probes in
 `t/gtk4/00_Binding.t`. Not assumed. Note that a copy of the runner placed
@@ -1194,6 +1300,16 @@ means the reported ~1190px window is not the layout's designed size.
 
 ## Suggested next steps
 
+0. **Layout-level option inheritance**, the natural follow-up to D031 and its
+   deferred alternative 5. `DefaultFont`, `DefaultFontColor`, `PATH`,
+   `SkinPath`, and `SkinFile` are read into `{global_options}` at
+   `gmusicbrowser_layout.pm:971` and inherited by every widget in the layout.
+   `desktop.layout` sets `DefaultFontColor= white` at three scopes and
+   `fullscreen.layout` sets `DefaultFont = 20`, so this is reachable from the
+   bundled layouts, and the CSS mechanism it needs now exists. It is a
+   different unit from a widget option: scope it as option inheritance, not as
+   a label option.
+
 1. ~~Decide the six Proposed entries.~~ **Done.** D023, D024, D025, D026,
    D027, and D028 are all Accepted. The recorded resolutions, so a later
    session does not reopen them:
@@ -1266,6 +1382,42 @@ means the reported ~1190px window is not the layout's designed size.
 
 ## Working notes
 
+- **The OS theme font and colours already reach the renderer with no code.**
+  An unstyled `Gtk4::Label` measures 19x17 under this host's `Roboto 10`, and
+  GTK3 reports the same. Any `font=`/`color=` the renderer applies is an
+  *override* of the desktop theme, so reach for it only where a layout asks.
+- **A ratio only follows the theme if it is fixed against a constant
+  baseline.** Deriving a percentage from the live theme size cancels out
+  (`20/16 * 16pt` is `20pt`), reproducing the absolute size while the emitted
+  rule looks relative. Verify a relative translation by varying the theme and
+  reading the **rendered size**, not the emitted class.
+- **Pango is unreachable through the GTK4 binding.**
+  `Pango::FontDescription::from_string` is undefined, so a legacy font string
+  must be parsed in Perl. Pango is still available alongside Gtk3 for a
+  reference probe.
+- **`load_from_data` needs the byte length**, and a CSS rule body needs a
+  **trailing semicolon** or GTK warns `Expected ';' at end of block` while
+  still applying the rule — the warning is the only symptom.
+- **`dim-label` has no observable.** It styles by opacity at draw time, so
+  `get_color` and `get_opacity` both read unchanged; `has_css_class` is the
+  only check. An explicit CSS colour *is* readable through
+  `get_style_context->get_color`.
+- **A `font-size` assertion only discriminates away from the theme size.** At
+  `Roboto 10` a `10pt` rule measures identically to no rule.
+- **`gtk-application-prefer-dark-theme` has no effect in GTK4** — it is a GTK3
+  setting. The dark variant is a theme *name* (`Breeze-Dark`). This host is
+  genuinely in a dark context, with theme text at `rgb(249,250,251)`.
+- **Do not double `Gtk4::Gdk::Display` in `t/04_Gtk4LayoutRenderer.t`.** The
+  absence of a display is what makes `_IconTheme` return undef and every icon
+  fall back to text; adding one to enable CSS offline silently deletes that
+  coverage.
+- **A style provider is installed on the display, so it outlives the widget
+  tree.** `Destroy` must call `remove_provider_for_display`, which exists and
+  works.
+- **Isolating an option with `[(,]option=` misses a space after the comma.**
+  `[(,]markup=` reports 74 where the real count is **76**: two uses in
+  `songtree.layout` are written `, markup=`. Allow optional whitespace, and
+  treat the recorded 76 as correct.
 - **A widget's own CSS padding falsifies a geometry probe.** A `Gtk4::Button`
   asked for `set_size_request(40,24)` measures 26px wide at a 7px inset,
   because the theme's button style insets the allocation; a `Gtk4::Label`

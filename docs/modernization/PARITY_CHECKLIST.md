@@ -43,6 +43,7 @@ surface. Numeric suffixes retain the base element's behaviour.
 | Icon options (`icon=`, `stock=`) on the above | GTK4 in progress, see D023/D024 (accepted) |
 | `size=`/`relief=` on any button | GTK4 in progress, see D027 (accepted) |
 | `xalign=`/`yalign=`/`ellipsize=` on `Label`/`Text` | GTK4 in progress, see D028 (accepted) |
+| `font=`/`color=` on `Label`/`Text` | GTK4 in progress, see D031 (accepted) |
 | `tip=` tooltip option on the above | GTK4 in progress, literal tips only |
 | `AABox`, `AASearch`, `AddLabelEntry`, `Album`, `AlbumBox`, `AlbumSearch`, `Artist`, `ArtistBox`, `ArtistPic`, `ArtistSearch`, `BContext`, `Button`, `Choose`, `ChooseRandAlbum`, `Comment`, `Connections`, `Context`, `Cover`, `Date`, `EditList`, `EditListButtons`, `EmptyList`, `Equalizer`, `EqualizerPresets`, `EqualizerPresetsSimple`, `EventBox`, `FBox`, `FLock`, `FPane`, `Filter`, `FilterBox`, `FilterLock`, `FilterPane`, `Fullscreen`, `HSeparator`, `HistItem`, `LSortItem`, `LabelTime`, `LabelToggleButtons`, `LabelVol`, `LabelsIcons`, `LayoutItem`, `Length`, `Lock`, `LockAlbum`, `LockArtist`, `LockSong`, `MainMenuItem`, `MenuItem`, `OpenBrowser`, `OpenContext`, `OpenQueue`, `PFilterItem`, `PSortItem`, `PictureBrowser`, `PlayFilter`, `PlayItem`, `PlayList`, `PlayOrderCombo`, `PlayingTime`, `Pos`, `Pref`, `Progress`, `ProgressV`, `Queue`, `QueueActions`, `QueueFilter`, `QueueItem`, `QueueList`, `Refresh`, `Repeat`, `ResetFilter`, `Scale`, `SeparatorMenuItem`, `ShuffleList`, `SimpleSearch`, `SongInfo`, `SongList`, `SongSearch`, `SongTree`, `Sort`, `Stars`, `TabbedLists`, `Time`, `TimeBar`, `TimeSlider`, `Title`, `Title_by`, `TogButton`, `ToggleButton`, `Total`, `VProgress`, `VSeparator`, `Visuals`, `Vol`, `VolBar`, `VolSlider`, `Volume`, `VolumeBar`, `VolumeIcon`, `VolumeSlider`, `Year` | Not started |
 
@@ -247,6 +248,28 @@ of 150px place their child at x=0, 71, and 142 for `xalign` 0, .5, and 1, while
 the default `xscale=1` case fills its slot outright. That is coverage of an
 implementation that already existed, not a proof of new behaviour — the same
 file passes against the preceding commit.
+
+Legacy `font=` and `color=` on a label are now applied, through a
+`GtkCssProvider`, because GTK4 removed the per-widget `modify_font` and
+`override_color` those options used (**D031**). Two things about that row are
+worth reading before citing it as parity:
+
+- **`font=` is theme-relative, not absolute.** A legacy `font=20` becomes
+  `200%` of the desktop font rather than 20 points, so the rendering matches
+  GTK3 exactly on a 10pt desktop and deliberately diverges on any other. That
+  is an accepted parity exception, taken so the OS font preference reaches the
+  widget; measured, `font=20` renders 32px at a 10pt desktop and 51px at 16pt,
+  where absolute points stay at 20pt.
+- **`color=grey` becomes GTK4's `dim-label` class**, which follows the theme
+  and its dark variant instead of pinning a shade. It has no observable
+  through this binding, so the grey path is covered as a style class rather
+  than as a rendered colour.
+
+`DefaultFont`/`DefaultFontColor`, the layout-wide globals that
+`desktop.layout` and `fullscreen.layout` set, are **not** ported. So a `Text`
+in `desktop.layout` gets its explicit `color=grey` but not the inherited
+`white`. That is D031 alternative 5, deferred as layout-level option
+inheritance rather than a widget option.
 
 `AB`'s fractional gap is **closed** as of 2026-09-07. A fractional alignment
 or scale now goes through a `Gtk4::ConstraintLayout` reproducing the legacy

@@ -229,6 +229,54 @@ Evidence recorded so far, against the system
   40 at origin 0. A uniform offset across every row of a geometry table is
   the signature of this, not of a layout bug: use a CSS-neutral child such as
   a `Gtk4::Label` when measuring a container's placement.
+- **Pango is not reachable at all through the GTK4 binding.**
+  `Pango::FontDescription::from_string` and `Pango::FontDescription->new` are
+  both undefined, so the legacy `Pango::FontDescription::from_string($font)`
+  that `Layout::Label` uses (`gmusicbrowser_layout.pm:3118`) cannot be ported
+  directly; a font string has to be parsed in Perl. Pango *is* available
+  alongside Gtk3, so a GTK3 probe can still read one for reference.
+- **CSS works, and is the only route to a per-widget font or colour.**
+  `Gtk4::CssProvider->new`, `load_from_data`,
+  `Gtk4::StyleContext::add_provider_for_display`, and
+  `remove_provider_for_display` all work. Two details:
+  `load_from_data($css,length $css)` needs the **byte length as a second
+  argument** — a one-argument call dies with `passed too few parameters
+  (expected 3, got 2)` — and a rule body needs a **trailing semicolon** or
+  GTK warns `Expected ';' at end of block` for every rule while still
+  applying it.
+- **A `font-size` in a CSS rule is only observable above the theme size.**
+  The desktop font here is `Roboto 10`, and a `font-size: 10pt` rule measures
+  identically to no rule at all, so an assertion at the theme size passes
+  against a renderer that ignores the option. 8pt, 9pt, 11pt, 12pt, 14pt,
+  16pt, 20pt, and 30pt all measure distinctly. This is the same class of trap
+  as the 16px icon-size one recorded above.
+- **A percentage `font-size` computed from the live theme size cancels out.**
+  `20/16 * 16pt` is `20pt` again, so deriving a ratio from
+  `gtk-font-name` reproduces the absolute size and the desktop font never
+  reaches the widget. A ratio only follows the theme if it is fixed against a
+  constant baseline. See D031.
+- **`gtk-font-name` round-trips through `Gtk4::Settings` and can be set in a
+  test,** which is how the theme-following behaviour above was measured. Its
+  trailing number is the point size.
+- **`dim-label` has no observable.** GTK4's de-emphasis style class styles by
+  opacity at draw time: `get_style_context->get_color` returns the unmodified
+  theme colour and `get_opacity` returns 1. `has_css_class` is the only
+  check available, so a `dim-label` assertion is construction coverage. An
+  **explicit** CSS colour is fully observable —
+  `get_style_context->get_color` returned `rgb(255,255,255)` for
+  `color: white`.
+- **`gtk-application-prefer-dark-theme` is a GTK3 setting with no effect in
+  GTK4.** Setting it changed no colour. The dark variant is selected by theme
+  name instead (`Breeze` vs `Breeze-Dark`), and switching
+  `gtk-theme-name` does move the reported colour. This host reports
+  `prefer-dark-theme = 1` and theme text at `rgb(249,250,251)`, so it is
+  genuinely in a dark context.
+- **`Glib::Type->list_values` does not return an arrayref** for an
+  introspected enum such as `Gtk4::ConstraintStrength`; the call yields
+  `Not an ARRAY reference`. Enum values have to be obtained another way.
+- **`Gtk4::StyleContext->get_property('opacity')` dies** with `type
+  Gtk4::StyleContext does not support property 'opacity'`. Style values are
+  not readable as GObject properties through this binding.
 
 ## D007 — Canonical application ID
 
@@ -1307,6 +1355,149 @@ buckets `0.3` to `center`, not `start` (its threshold is `<=.25`); and
 "places the child 70% across the remaining slack" passes when the child fills
 the slot, because the target offset is then 0 and so is the measured one. Both
 are now paired with an assertion that the slack exists.
+
+## D031 — Legacy label `font=` and `color=` become theme-relative CSS
+
+Status: **Accepted**
+
+Gate: before any `Layout::Label` row citing `font=`/`color=` is advanced past
+`GTK4 in progress`
+
+Context:
+
+`Layout::Label` applies `font=` with `Gtk3::Label::modify_font` and `color=`
+with `override_color` (`gmusicbrowser_layout.pm:3118-3122`). GTK4 **removed
+both**: there is no per-widget font or colour override left, and styling goes
+through `GtkCssProvider`.
+
+Usage in the bundled layouts, isolated with `[(,] *(font|color)=`:
+
+| option | uses | where |
+|---|---:|---|
+| `color=` | 5 | 4 on `Text` in `desktop.layout`, 1 on the drawing layer in `shimmer.layout:132` |
+| `font=` | 4 | `Title`/`Artist`/`Album`/`Date` in `shimmer.layout` |
+
+`desktop.layout` also sets `DefaultFontColor= white` at three scopes and
+`DefaultFont=8`, and `fullscreen.layout` sets `DefaultFont = 20`. Those are
+layout-wide globals read at `gmusicbrowser_layout.pm:971`, so `color=grey`
+there overrides an inherited `white`.
+
+Measured through the system binding on GTK 4.14.5, and this is what shaped the
+decision: **the OS theme font and colours already reach the renderer's labels
+with no code at all.** The desktop font is `Roboto 10`, an unstyled
+`Gtk4::Label` measures 19x17, and GTK3 on the same host reports the same font
+and the same 19x17. So the starting point already satisfies the project goal
+that the desktop theme supply the presentation; anything this decision adds is
+an *override* of that.
+
+Decision:
+
+Both options become a style class on one `Gtk4::CssProvider` that the renderer
+installs on the display with `add_provider_for_display` and takes off again in
+`Destroy`. Rules are keyed by value, so two widgets asking for the same font
+or colour share one rule.
+
+**`font=` is emitted as a percentage of the theme font, not as absolute
+points.** The ratio is fixed against a 10pt baseline — the GTK3 default the
+bundled layouts were authored against, verified on this host rather than
+assumed — so `font=20` is always `200%` and `font=8` always `80%`.
+
+Measured, this is what makes the desktop font reach the widget:
+
+| desktop font | unstyled | `font=20` | `font=8` |
+|---|---:|---:|---:|
+| Roboto 10 | 17px | 32px | 13px |
+| Roboto 16 | 26px | 51px | 21px |
+| Roboto 8 | 13px | 26px | 11px |
+
+At the 10pt baseline the rendering is identical to GTK3's absolute 20pt. Away
+from it the layout's *relative* emphasis is preserved instead of its absolute
+size, which is the deliberate exception this entry records.
+
+**`color=` maps a grey onto GTK4's `dim-label` style class**, which follows the
+theme including its dark variant, because every bundled use is a grey
+expressing de-emphasis rather than a request for one specific shade. A grey is
+either a named grey (`grey`, `gray`, `silver`, `dimgrey`, …) or a hex value
+whose channels are equal, so `#ccc` and `#888888` classify the same way. Any
+other colour is emitted literally as `color: <value>`.
+
+A value that cannot be translated — a `font=` naming no size, a colour CSS
+cannot parse — and any value at all on a display where no provider can be
+installed, leaves the option reported through `Unhandled`. Only known-safe
+colour spellings are emitted, because one unparseable declaration makes GTK
+drop the whole sheet.
+
+Alternatives:
+
+1. Emit `font=` as absolute points, reproducing GTK3 exactly. Rejected by the
+   user after measurement: it is mathematically what deriving the percentage
+   from the *live* theme size also does (20/16 of a 16pt theme is 20pt again),
+   and it shuts the user's font preference out of exactly the widgets a layout
+   styles. This is the one place where D002 fidelity and the D022/D029 goal of
+   letting the desktop theme through genuinely conflict, and the user chose the
+   theme.
+2. Emit every `color=` literally. Rejected for greys: a fixed mid-grey is
+   theme-blind, and on a dark desktop — this host reports
+   `gtk-application-prefer-dark-theme = 1` with theme text at
+   `rgb(249,250,251)` — it no longer reads as de-emphasis relative to its
+   surroundings. Kept for non-greys, where the layout is naming a colour rather
+   than an intent.
+3. Map every `color=` onto `dim-label`, discarding the value. Rejected: a
+   layout asking for red would silently get grey.
+4. Clamp the font ratio to a narrow band. Rejected as an extra rule to justify
+   with no bundled layout needing it; `font=20` at a 16pt desktop is large by
+   the layout's own intent.
+5. Port `DefaultFont`/`DefaultFontColor` inheritance in the same increment.
+   Deferred, not rejected: they are layout-wide globals rather than widget
+   options, so they belong with a scoped port of layout-level option
+   inheritance. Until then a `Text` inside `desktop.layout` gets its explicit
+   `color=grey` but not the inherited `white`, which is recorded as a gap
+   rather than fixed here.
+
+Consequences:
+
+`Label` and `Text` now honour `font=` and `color=`, and both leave
+`%LabelHandled`'s ignored list. No layout-visible option name changes, so the
+D002 surface is untouched. This stays inside D013 on the same ground as D023,
+D024, D027, and D028: it replaces a mechanism GTK4 removed. Under D029 the CSS
+provider is the native answer, and the theme-relative form is what keeps the
+native mechanism from overriding the OS theme.
+
+Two limits worth stating plainly:
+
+- **`dim-label` has no observable through this binding.** It styles by opacity
+  at draw time, so `get_color` returns the unmodified theme colour and
+  `get_opacity` returns 1. It can only be asserted as a CSS class, which makes
+  the grey path construction coverage rather than rendered-colour coverage. An
+  explicit colour *is* observable through
+  `get_style_context->get_color`.
+- The four bundled `font=` uses are on `Title`/`Artist`/`Album`/`Date`, none of
+  which the renderer builds yet, so `font=` is exercised only by the fixture
+  until those elements land. `color=` on `Text` is reachable today.
+
+Evidence or removal condition:
+
+`t/gtk4/30_Box.t` measures the rendered height for `font=20` and `font=8`
+against an unstyled label carrying identical text, asserts the ratio classes,
+reads an explicit colour back from the style context, and asserts the
+`dim-label` class and the `Unhandled` bookkeeping for a refused value.
+`t/04_Gtk4LayoutRenderer.t` covers the grey classification, the refusal cases,
+the baseline constant, and that `Destroy` releases the provider.
+
+Run against the previous renderer, `t/gtk4/30_Box.t` fails 8 of 124 on real
+Wayland and `t/04_Gtk4LayoutRenderer.t` fails 14 of 230 offline. The offline
+comparison needs `_IsGrey`, `_ColorRule`, `_FontRule`, and the baseline
+constant stubbed into the pristine copy, or the helper block dies before its
+assertions are reached. Controls passing on both trees: every "is not a grey"
+and "is refused" assertion, `a label with no font= gets no font class`, `an
+unparseable font= leaves the theme font alone`, and the three `Unhandled`
+assertions for values pristine also refuses.
+
+Note for anyone extending these assertions: the theme colour differs between
+environments — near-white on this desktop, `rgb(46,52,54)` inside
+`tools/run-gtk4-smoke`, whose Adwaita and unset session bus are already
+recorded in D006. Compare against the measured theme colour rather than
+hard-coding one.
 
 ## Decision template
 
