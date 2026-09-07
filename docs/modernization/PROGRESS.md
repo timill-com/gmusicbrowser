@@ -100,8 +100,10 @@ and the order below is set by what blocks what, not by size.
 | everything else (`ToggleButton` 35, `Cover` 26, `Sort` 21, `TimeBar` 20, …) | 390 | mostly pointer input and the show/hide subsystem |
 
 **The sequencing lesson so far: M1's exit gate is unmet while M4/M5 widget work
-has been proceeding.** That is why input came first, and the list model second.
-Three probes are still BLOCKED, and each gates a group above:
+has been proceeding.** That is why input came first, the list model second, and
+drawing third. Three probes are still BLOCKED, and **none of them gates a group
+in the table above** — they are playback, transfer and packaging concerns
+rather than layout ones, which is a change from every previous session:
 
 1. ~~input controllers~~ — **closed**, `t/gtk4/50_Input.t`. It was the correct
    first move because it is the only probe every other group depends on: menus
@@ -122,14 +124,19 @@ Three probes are still BLOCKED, and each gates a group above:
    **This does not unblock the 173-instance list group on its own** — those
    widgets also need the song-field state path and the per-widget subsystems;
    what it removes is the architectural unknown.
-3. **custom drawing** — gates the SongTree skin layer, and is now the largest
-   unknown left. Partly answered: D006 records that layout vfunc overrides are
-   silently ignored, so the answer is likely "compose, do not subclass", as `AB`
-   did under D030. The list-model probe narrowed it further — a Perl-defined
-   `Glib::Object` subclass works fine for **row data**, so it is specifically
-   widget drawing and layout that remain in question.
+3. ~~**custom drawing**~~ — **closed**, `t/gtk4/80_Drawing.t`. "Compose, do not
+   subclass" was the right guess, and the reason is stronger than expected:
+   **neither GTK4 drawing path is reachable from Perl.** `GtkDrawingArea`'s
+   callback dies on the unregistered `CairoContext` and `GtkSnapshot`'s
+   positioning calls die on the graphene types, so a custom-drawn widget cannot
+   be written at all. What works is offscreen `Cairo` — the standalone module
+   still renders — uploaded as a `Gdk::MemoryTexture` and shown through a
+   `Gtk4::Picture`, pixel-exact. That fits `Skin::draw`, which already caches a
+   pixbuf per state and paints it rather than drawing live vectors.
 4. **drag and drop**, **async finish/error**, **GStreamer loop coexistence** —
    independent of the layout surface; needed for the gate, not for widgets.
+   `DragSource` and `DropTarget` both already construct (D006), so drag and drop
+   is a behaviour probe rather than a feasibility one.
 
 **The gate on menus is command registration, not the `MenuItem` widget.**
 Measured 2026-09-07 by walking the parser catalog for `command=` values. There
@@ -206,11 +213,12 @@ The next unimplemented elements by instance count, for scale:
 | suite | result | notes |
 |---|---|---|
 | `make test-modernization` | 548 assertions, 0 skips | offline, in-process doubles |
-| `make test-gtk4` | 452 TAP = 448 executed + 4 skips | real Wayland; 3 M1 probes still BLOCKED |
+| `make test-gtk4` | 484 TAP = 481 executed + 3 skips | real Wayland; 3 M1 probes still BLOCKED |
 | `make test-gtk3` | 1 assertion | startup/shutdown on real Wayland |
 
-Per file for `make test-gtk4`: 18 binding (holding all 4 skips), 4
-proof-of-life, 84 pane, 166 box, 74 icon, 27 input, 25 menu, 54 list model.
+Per file for `make test-gtk4`: 18 binding (holding all 3 skips), 4
+proof-of-life, 84 pane, 166 box, 74 icon, 27 input, 25 menu, 54 list model,
+32 drawing.
 Count skips from `prove -v`, never by subtraction, and run the files through
 `tools/run-gtk4-smoke`: a bare `prove` without `GMB_GTK4_SMOKE=1` reports
 different counts (19 TAP and 6 skips for `00_Binding.t`) because the
@@ -313,7 +321,7 @@ picture. The ninth, **D039**, is new and is the one to settle before menus:
 | D006 | Open | which GTK4 Perl binding to support — the **M1 gate**. Its evidence section is the accumulated binding-behaviour record every increment reads. |
 | D007 | Open | canonical application ID |
 | D008 | Open | minimum supported platform versions |
-| D010 | Open | SongTree GTK4 rendering architecture — gates the largest widget. **Option 1's performance half is now measured and passes**; what remains is the custom-drawing probe. |
+| D010 | Open | SongTree GTK4 rendering architecture — gates the largest widget. **Both halves are now measured**: option 1 performs, and option 2 is *unavailable* because no render node can be emitted. Ready to settle. |
 | D009 | Proposed | transitional use of deprecated GTK4 TreeView APIs |
 | D011 | Proposed | initial packaging format |
 | D012 | Proposed | legacy playback backends |
@@ -324,8 +332,8 @@ D006 and D010 are the two that matter for the port's shape: D006 because the
 binding's limits have already made one design impossible (layout vfunc
 overrides are silently ignored, which is why `AB` uses a constraint layout),
 and D010 because `SongList`/`SongTree` is the biggest remaining widget — though
-its performance question is now answered, so what is left of it is the drawing
-layer rather than the architecture.
+both its questions are now measured, so it is ready to be settled rather than
+probed further.
 
 ## Not started at all
 
@@ -334,5 +342,5 @@ container `FB` (whose prefix now parses, but whose `SFixed` dynamic placement
 needs a layout manager — D035), embedded layouts (`@layout`), every list/model widget, SongTree,
 drag and drop, the drawing layer used by the SongTree skins, `hover_layout`,
 right-to-left packing, configuration persistence for the GTK4 proof
-application, and the remaining M1 gate probes (custom drawing, drag and drop,
-async finish/error, GStreamer loop coexistence, reproducible packaging).
+application, and the remaining M1 gate probes (drag and drop, async
+finish/error, GStreamer loop coexistence, reproducible packaging).

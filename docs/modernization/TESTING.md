@@ -52,10 +52,11 @@ the same command outside it passed on the real Wayland connection. The two
 original test files reported 22 TAP results: 16 executed assertions passed and
 six feasibility probes were explicitly skipped. This replaces the temporary
 archive setup recorded on 2026-09-06, whose reported total also included those
-six skips. As of the list-model probe the suite reports **452 TAP = 448
-executed + 4 skips** (18 binding, 4 proof-of-life, 84 pane, 166 box, 74 icon,
-27 input, 25 menu, 54 list model), counted from `prove -v`. A pinned,
-reproducible package and the three remaining M1 probes are still required.
+six skips. As of the drawing probe the suite reports **484 TAP = 481
+executed + 3 skips** (18 binding, 4 proof-of-life, 84 pane, 166 box, 74 icon,
+27 input, 25 menu, 54 list model, 32 drawing), counted from `prove -v`. A
+pinned, reproducible package and the three remaining M1 probes are still
+required.
 
 **Measure the per-file counts through `tools/run-gtk4-smoke`, not a bare
 `prove`.** Without `GMB_GTK4_SMOKE=1` and the isolated XDG environment the
@@ -98,9 +99,10 @@ totals for the same command: 173 results before `Next`/`Prev`, 184 after it,
 normalisation, 287 after the `AB` constraint layout, 304 after the label
 `font=`/`color=` CSS, 323 after the inheritance, 337 after the static
 `markup=`, 346 after the size groups, 373 after the input probe, 398 after the
-menu interpreter, 452 after the list-model probe. Per file: 18
-binding, which is where all four remaining skips live, 4 proof-of-life, 84
-pane, 166 box, 74 icon, 27 input, 25 menu, 54 list model. The
+menu interpreter, 452 after the list-model probe, 484 after the drawing probe.
+Per file: 18
+binding, which is where all three remaining skips live, 4 proof-of-life, 84
+pane, 166 box, 74 icon, 27 input, 25 menu, 54 list model, 32 drawing. The
 per-file figures were measured through the smoke runner, not by subtraction.
 
 **Two GTK `Failed to set text ... from markup` warnings are expected** in this
@@ -390,6 +392,44 @@ because D022 makes stock GNOME a required target.
 With `icon_path` omitted or pointing at a missing directory, rendering still
 succeeds: standard names resolve, bundled names return nothing and the widget
 keeps its text label.
+
+## The drawing probe
+
+`t/gtk4/80_Drawing.t`, 32 assertions on real Wayland, for the M1 gate row and
+the remaining half of D010. Like the input and list-model probes it measures
+the binding and passes on a pristine tree; that is the nature of a gate probe,
+not a weakness in the test.
+
+**Its main value is negative, and the negatives are the expensive kind: both
+GTK4 drawing paths look open until they are called.**
+
+- `Gtk4::DrawingArea` constructs and `set_draw_func` is **accepted without
+  complaint**. Only mapping the widget reveals that the callback is handed a
+  `CairoContext`, whose GType is not registered with gperl. Loading the `Cairo`
+  module first does not help, before or after `try_init`.
+- `Gtk4::Snapshot` constructs, `save`/`restore` work, and `Gdk::RGBA` is fully
+  usable — `parse('red')` gives `rgb(255,0,0)`. It is the **geometry** that is
+  unreachable: `append_color` and `translate` fail on the unregistered graphene
+  types and `to_node` on `GskRenderNode`. An assertion pins the fact that the
+  failure names `GrapheneRect` and not the colour, because "the colour argument
+  is wrong" is the natural first misreading.
+
+**Check the failing call outside a signal handler.** The `DrawingArea` failure
+is only visible because the probe runs `$app->run` inside an `eval`; inside a
+handler Glib would catch it and print `unhandled exception in callback` to
+stderr while the assertion passed blind. Same trap as D006 records for
+`get_current_event`.
+
+The working route, asserted end to end: render with the standalone `Cairo`
+module into an `ImageSurface`, wrap `get_data` in a `Glib::Bytes`, build a
+`Gdk::MemoryTexture` with the surface's own stride, display through a
+`Gtk4::Picture`. The probe downloads the texture back and checks the pixels
+(BGRA byte order, so a red row reads `0,0,255,255`), maps it on screen, and
+swaps the paintable to prove a repaint. `Gdk::Texture` itself is abstract and
+does not construct — the error is about instantiability, not arguments.
+
+Not measured: the cost of that route at list scale. The probe swaps one
+texture, not a viewport of them during a scroll.
 
 ## The list-model probe
 

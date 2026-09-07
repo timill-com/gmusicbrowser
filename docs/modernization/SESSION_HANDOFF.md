@@ -1,10 +1,67 @@
 # Session handoff
 
-Status: the tree is clean. The most recent session did **one** increment after
-re-verifying the whole baseline: the **M1 100k-row list-model probe**
-(`t/gtk4/70_ListModel.t`), which closed the second gate row and answered the
-performance half of **D010**. It also recorded **D039**, the user's answer on
+Status: the tree is clean. The most recent session did **two** probe increments
+after re-verifying the baseline: the **M1 100k-row list-model probe**
+(`t/gtk4/70_ListModel.t`) and the **M1 custom-drawing probe**
+(`t/gtk4/80_Drawing.t`). Between them they answer **both halves of D010**, which
+is now ready to settle rather than probe. **D039** records the user's answer on
 how to modernize `RunPerlCode`.
+
+**The three M1 probes still BLOCKED no longer gate any layout work** — drag and
+drop, async finish/error, and GStreamer loop coexistence are transfer, playback
+and packaging concerns. That is a change from every previous session, where a
+blocked probe sat in front of a widget group.
+
+## Most recent increment: the custom-drawing probe
+
+`t/gtk4/80_Drawing.t`, 32 assertions on real Wayland.
+
+**Both GTK4 drawing paths are closed through this binding, and both look open
+until they are called** — which is the finding, and the reason it needed a probe
+rather than a reading of the docs:
+
+- **`Gtk4::DrawingArea` constructs and `set_draw_func` is accepted without
+  complaint.** Mapping the widget then dies: the callback would be handed a
+  `CairoContext`, whose GType is not registered with gperl. The draw function
+  never runs even once. Loading the `Cairo` module first does not register it,
+  before or after `try_init`.
+- **`Gtk4::Snapshot` constructs and `Gdk::RGBA` is fully usable**
+  (`parse('red')` → `rgb(255,0,0)`), so the natural first read of the failure —
+  "my colour argument is wrong" — is wrong. It is the **geometry**:
+  `append_color` and `translate` die on the unregistered graphene types, and
+  `to_node` on `GskRenderNode`. There is an assertion pinning that the error
+  names `GrapheneRect`, precisely to stop the next session re-debugging the
+  colour.
+
+**Consequence for D010, and it is a strong one: option 2 (a purpose-built
+virtualized snapshot widget) is not merely unattractive, it is unavailable.**
+There is no way to emit a render node from Perl.
+
+**What works is composition, the same move as `AB` under D030.** The standalone
+`Cairo` module is independent of the introspection binding and still renders:
+draw into a `Cairo::ImageSurface`, wrap `get_data` in a `Glib::Bytes`, build a
+`Gdk::MemoryTexture` with the surface's own stride, and show it through a
+`Gtk4::Picture`. The probe reads the pixels back with `download` and checks them
+(BGRA, so a red row is `0,0,255,255`), maps the result on screen, and swaps the
+paintable to prove a repaint.
+
+**So the legacy drawing *code* is portable even though the legacy *callback* is
+not**, and that matters more than it sounds: `Skin::draw`
+(`gmusicbrowser_layout.pm:5737`) already caches a pixbuf per state and size and
+paints it, so it composites a cached image rather than drawing live vectors.
+It is close to the shape the texture route wants. CSS already covers the flat
+backgrounds and borders (D031, D032).
+
+**Not measured, and excluded from any claim:** the cost of this at list scale.
+The probe swaps one texture, not a viewport of them during a scroll. That is
+the next thing to measure before committing to a SongTree design.
+
+### Method note
+
+The `DrawingArea` failure is only visible because `$app->run` is wrapped in an
+`eval`. Inside a signal handler Glib catches the error and prints `unhandled
+exception in callback` to stderr, so an assertion written there passes blind —
+the same trap D006 records for `get_current_event`, hit again in a new place.
 
 ## Most recent session: the 100k-row list-model probe
 
@@ -1929,9 +1986,11 @@ rough order of value:
 - **The song-field state path**, still blocked on the frozen
   `FRONTEND_CONTRACT.md` and a fixture song source — see 0b below, which is
   unchanged and still the largest converging gate.
-- **The custom-drawing probe**, now the largest remaining M1 unknown and the
-  other half of D010. The list-model probe narrowed it: row *data* subclassing
-  works, so the question is specifically widget drawing and layout.
+- ~~The custom-drawing probe~~ — **done**, `t/gtk4/80_Drawing.t`. What it
+  leaves behind is a *decision*, not a probe: **D010 is ready to settle**, with
+  option 2 ruled out by the binding and option 1 measured. The one thing worth
+  measuring first is the texture route at list scale — a viewport of textures
+  rebinding during a scroll, rather than the single swap the probe did.
 - **The show/hide subsystem**, which unlocks `ToggleButton` (35) and the 28
   `togglewidget` `MenuItem`s, and needs no frozen-contract change.
 

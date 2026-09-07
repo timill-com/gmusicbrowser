@@ -340,6 +340,25 @@ Evidence recorded so far, against the system
   nothing else — the view neither repositions nor rebinds a single row, so a
   recycling measurement taken that way reads "no recycling" and looks like a
   binding limitation. `$view->scroll_to($row,'none',undef)` works.
+- **Both GTK4 drawing paths are closed, and both look open until called.**
+  `Gtk4::DrawingArea` constructs and `set_draw_func` is accepted without
+  complaint, but mapping the widget dies with `GType CairoContext ... is not
+  registered with gperl` and the draw function never runs. `Gtk4::Snapshot`
+  constructs and `save`/`restore` work, but `append_color` and `translate` fail
+  on the unregistered `GrapheneRect`/`GraphenePoint`, and `to_node` fails on
+  `GskRenderNode` (204). `Gtk4::Gdk::RGBA` is fully usable, so **colour is not
+  the obstacle; geometry is**. Loading the `Cairo` module first does not
+  register the type, before or after `try_init`. See `t/gtk4/80_Drawing.t`.
+- **The drawing route that works is offscreen Cairo uploaded as a texture.**
+  The standalone `Cairo` module is independent of the introspection binding and
+  still renders. Render into a `Cairo::ImageSurface`, wrap `get_data` in a
+  `Glib::Bytes`, build a `Gtk4::Gdk::MemoryTexture` with the surface's stride,
+  and show it through a `Gtk4::Picture`. The pixels survive the round trip
+  exactly — read back with `download`, a red row reads BGRA `0,0,255,255` — the
+  result maps on screen, and replacing the paintable repaints. So the legacy
+  drawing *code* is portable even though the legacy *callback* is not.
+  `Gtk4::Gdk::Texture` itself is abstract and does not construct;
+  `new_from_filename` loads a bundled PNG.
 - **`GdkEvent` is not marshallable, like the graphene types.**
   `GestureClick->get_current_event` dies with `interface_to_sv: Don't know how
   to handle fundamental type GdkEvent (200)`. **Inside a signal handler Glib
@@ -449,10 +468,29 @@ widgets for 100,000 rows**, reusing them on scroll. Memory and construction
 cost therefore scale with the viewport, not the library. Nothing here argues
 for option 2 on performance grounds, which was the main reason it existed.
 
-**What is not yet answered, and what shifted:** the probe measured the model
-and the factory, not the SongTree's grouped/skinned row rendering. That is the
-custom-drawing gate row, still BLOCKED. Two binding limits also narrow how
-option 1 would be built:
+**The drawing half is now answered too** (`t/gtk4/80_Drawing.t`, 2026-09-07),
+and it removes option 2 rather than supporting it. Neither GTK4 drawing path is
+reachable from Perl: `GtkDrawingArea`'s callback dies on the unregistered
+`CairoContext`, and `GtkSnapshot`'s positioning calls die on the graphene
+types. **A purpose-built virtualized snapshot widget cannot be written through
+this binding at all**, because there is no way to emit a render node — so
+option 2 is not merely unattractive on performance grounds, it is unavailable.
+
+What *is* available is composition: render with the standalone `Cairo` module
+offscreen, upload as a `Gdk::MemoryTexture`, and display through a
+`Gtk4::Picture`. That is the same shape as `AB`'s constraint layout under D030,
+and it fits `Skin::draw` (`gmusicbrowser_layout.pm:5737`) closely, because that
+function already **caches a pixbuf per state and size and paints it** rather
+than drawing live vectors. CSS already covers flat backgrounds and borders
+(D031, D032).
+
+**So the shape of the answer is option 1 for the list mechanics, with skinned
+rows composed from textures** — close to option 3, but with the custom part
+being a *paintable*, not a widget subclass. What remains unmeasured is the cost
+of that at list scale: the probe swapped one texture, not a viewport of them
+during a scroll.
+
+Two binding limits also narrow how option 1 would be built:
 
 - **Sorting cannot use the GTK sorters.** `GtkExpression` is unmarshallable and
   `CustomSorter` receives `undef` items, so ordering happens in Perl over the

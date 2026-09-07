@@ -26,7 +26,7 @@ Statuses used here are **Not started**, **Boundary work**, **GTK4 in progress**,
 | GTK4 renderer builds `VB`, `HB`, `Label`, `Play`, and `Quit` | GTK4 in progress | Local widget and interaction proof passed |
 | Command and state boundary drives the proof widgets | GTK4 in progress | Contract and GUI proof passed |
 | 100,000-row modern list/model probe | GTK4 in progress | `t/gtk4/70_ListModel.t` passed on real Wayland; 205 row widgets for 100,000 rows, model built in 0.12-0.27s |
-| Custom drawing/widget probe | Boundary work | Render and lifecycle test |
+| Custom drawing/widget probe | GTK4 in progress | `t/gtk4/80_Drawing.t` passed on real Wayland; both native paths unreachable, offscreen Cairo to a MemoryTexture works |
 | Click, motion, scroll, keyboard, and menu controllers | GTK4 in progress | `t/gtk4/50_Input.t` passed on real Wayland; DnD still separate |
 | GStreamer bus and GTK4 GLib-loop coexistence | Boundary work | Deterministic bus test |
 | Reproducible package contains Perl binding and typelibs | Not started | Clean package build and run |
