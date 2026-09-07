@@ -31,11 +31,17 @@ All figures from walking the parser's own catalog over `layouts/*.layout`
 | Container types | 8 | 15 | `HB VB HP VP SB FR EB AB WB` |
 | Layout element names | 8 | 110 | 95 definitions + 15 aliases |
 | Element *definitions* | 7 | 95 | `Label` is an alias of `Text` |
-| **Widget instances in bundled layouts** | **235** | **1163** | **20.2%** |
+| **Widget instances in bundled layouts** | **235** | **1161** | **20.2%** |
 | Layout definitions parsed | 76 | 76 | in 13 files, 0 diagnostics |
 
 The instance figure is the honest measure of usefulness: 7% of element types,
 but a fifth of what the shipped layouts actually ask for.
+
+The total was **1163** until D035. `FB` had no packing-prefix branch in the
+parser, so each of the two bundled `FB` declarations contributed a phantom
+widget named after its coordinates. Two non-widget entries remain in the walk
+and are **correct**: `contrib.layout:78` carries two commented-out widgets after
+a mid-line `#`, which legacy also parses as unresolvable widget names. See D035.
 
 Implemented elements, by instances declared in the bundled layouts:
 
@@ -118,7 +124,7 @@ The next unimplemented elements by instance count, for scale:
 
 | suite | result | notes |
 |---|---|---|
-| `make test-modernization` | 473 assertions, 0 skips | offline, in-process doubles |
+| `make test-modernization` | 484 assertions, 0 skips | offline, in-process doubles |
 | `make test-gtk4` | 346 TAP = 340 executed + 6 skips | real Wayland; skips are pre-existing M1 probes |
 | `make test-gtk3` | 1 assertion | startup/shutdown on real Wayland |
 
@@ -186,7 +192,7 @@ figures; see D034. The reliable method is to walk the parser's catalog.
 
 ## Decisions
 
-D001–D034 exist; **26 are Accepted** and **8 are unresolved**. All eight are
+D001–D035 exist; **27 are Accepted** and **8 are unresolved**. All eight are
 pre-existing and none blocks a layout increment, but four of them are gates on
 the milestones, so do not read the layout work's cleared backlog as the whole
 picture:
@@ -210,7 +216,8 @@ and D010 because `SongList`/`SongTree` is the biggest remaining widget.
 ## Not started at all
 
 Menus (`SM`/`MB`/`BM`, `MenuItem`), tabbed containers (`TB`/`NB`), the fixed
-container `FB`, embedded layouts (`@layout`), every list/model widget, SongTree,
+container `FB` (whose prefix now parses, but whose `SFixed` dynamic placement
+needs a layout manager — D035), embedded layouts (`@layout`), every list/model widget, SongTree,
 drag and drop, the drawing layer used by the SongTree skins, `hover_layout`,
 right-to-left packing, configuration persistence for the GTK4 proof
 application, and the remaining M1 gate probes (100k-row model, custom drawing,

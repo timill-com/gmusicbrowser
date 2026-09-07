@@ -10,13 +10,14 @@ make test-modernization
 
 This runs the neutral layout parser, frontend contract and lifecycle, legacy
 adapter and lifecycle integration, and GTK4 renderer contract tests. On
-2026-09-07 it reported 473 executed assertions passed and no skips. Running
+2026-09-07 it reported 484 executed assertions passed and no skips. Running
 totals: 269 two sessions ago, 298 after `Next`/`Prev`, 315
 after `Filler`, 317 after the shared labels fixture, 325 after the
 `size=`/`relief=` increment, 342 after label alignment/ellipsize, 344 after the
 `ellipsize=1` normalisation, 364 after the `AB` constraint layout, 395 after
 the label `font=`/`color=` CSS, 415 after the `DefaultFont`/`DefaultFontColor`
-inheritance, 458 after the static `markup=`, 473 after the size groups. The
+inheritance, 458 after the static `markup=`, 473 after the size groups, 484
+after the `FB` packing prefix. The
 skip count was read from `prove -v`, not assumed. The
 renderer test uses small in-process GTK doubles; it proves the
 parser/renderer/command wiring without claiming that a real GTK4 binding or
@@ -376,6 +377,33 @@ because D022 makes stock GNOME a required target.
 With `icon_path` omitted or pointing at a missing directory, rendering still
 succeeds: standard names resolve, bundled names return nothing and the widget
 keeps its text label.
+
+## The `FB` packing prefix
+
+D035. `t/02_LayoutParser.t` gained 11 assertions over a new `[parser fixed]`
+block in `t/layouts/parser.layout` plus the bundled `fullscreen.layout`.
+
+**The expected values came from the legacy tokenizer, not the new code.**
+`::ExtractNameAndOptions` was run standalone with the legacy `FB` `Prefix`
+regex over the three shapes, and its output — `HBinner` with prefix
+`.1,0,.8,0`; `Play3` with `5,4`; `Quit3` with `-5,.4,5,.2` — is what the
+assertions encode. Writing the oracle from the implementation would have made
+the whole comparison circular.
+
+Against a pristine `git archive HEAD` tree with only the test and the fixture
+overlaid, the file fails **11 of 56**: exactly the new assertions. The other
+45 pass on both trees and are the controls. The pristine values are the
+phantom-widget symptom rather than incidental breakage — `got '2' / expected
+'1'`, `got '.1,0,.8,0' / expected 'HBinner'`, `got 'widget' / expected
+'container_ref'`, and `got '' / expected '.1,0,.8,0'`.
+
+**One trap this hit: a fixture inserted into a shared layout file moves every
+later line.** `t/02_LayoutParser.t` asserts the source line of the
+`invalid_header` diagnostic, which shifted 22 → 29 when the seven-line block was
+added. That is a fixture-position dependency, not a regression, but it fails
+identically on both trees and so cannot discriminate. Append-only fixtures avoid
+it; this one needed placing before `[parser child]` to keep the `based on`
+chain readable.
 
 ## `Filler` and the legacy size request
 

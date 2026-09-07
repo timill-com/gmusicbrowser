@@ -61,7 +61,7 @@ surface. Numeric suffixes retain the base element's behaviour.
 | `TB`, `NB` | Legacy/current tabbed container | Not started |
 | `MB`, `SM`, `BM` | Menu bar, submenu, button menu | Not started |
 | `EB` | Expander | GTK4 in progress |
-| `FB` | Fixed-position container | Not started |
+| `FB` | Fixed-position container | Not started; prefix parses, see D035 (accepted) |
 | `FR` | Frame | GTK4 in progress |
 | `SB` | Scroller | GTK4 in progress |
 | `AB` | Alignment wrapper | GTK4 in progress, see D025/D030 (accepted) |
@@ -100,6 +100,21 @@ layouts contain **88** `icon=` and **17** `stock=` uses; exactly one of those
 105 lands on an implemented widget (`Quit1(icon=gmb-turnoff)`, verified against
 the parser's catalog), so the rest still belong to widgets that are not
 implemented yet. Icon artwork is unchanged, so this stays inside D013.
+
+`FB` is parsed correctly as of D035 but is **not** rendered, and it is not the
+small increment an earlier handoff recorded. `Gtk4::Fixed` covers only static
+placement; both bundled uses (`fullscreen.layout:18` and `:39`) are the
+fractional `.1,0,.8,0` form, whose behaviour lives entirely in `SFixed`'s
+`size_allocate` override (`gmusicbrowser_layout.pm:2443`). D006 records that
+layout vfunc overrides are silently ignored through this binding, so a port must
+compose a layout manager as `AB` does under D030.
+
+`TB` is likewise mis-scoped in earlier notes as fixture-only. There are two live
+uses: `search.layout:6` holds three unimplemented search widgets, but
+`main.layout:22` holds `VPRight` — an implemented pane — alongside `Context`, so
+it is half-reachable from a shipped layout. Verified by walking the parser
+catalog, not by grep; note that container names carry word suffixes
+(`TBRight`, `FBLower`), so a `^(TB|FB)\d*$` filter silently matches nothing.
 
 Earlier revisions recorded 99 and then 103 `icon=`. Both were grep totals: a
 raw `[(,] *icon=` reports 93, of which 5 are in comments or `{Group}` skin

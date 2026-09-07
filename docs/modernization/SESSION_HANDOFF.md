@@ -1,7 +1,76 @@
 # Session handoff
 
-Status: the tree is clean. This session did three increments and added a
-progress overview:
+Status: the tree is clean. The most recent session did **one** increment, a
+parser correctness fix (**D035**), after re-verifying the whole baseline.
+
+## Most recent session: the `FB` packing prefix (D035)
+
+**How it was found is the transferable part.** The task was to scope the
+song-field state path with the user. Sizing the smaller alternatives first —
+rather than taking the previous handoff's descriptions on trust — showed two of
+them were mis-scoped, and one of those mis-scopings was a live parser defect.
+
+`_extract_children` translated the packing prefix for `HB`/`VB`, `HP`/`VP` and
+`TB`, three of the **six** `Prefix` regexes in `%Layout::Boxes::Boxes`. `FB`'s
+was missing, so `FBLower= .1,0,.8,0 HBLower` parsed into a phantom widget named
+`.1,0,.8,0` (element `.1,0,.8,` — the numeric-suffix rule stripping the last
+digit) plus the real container with empty packing. **0 diagnostics.** The fix is
+a three-line branch using the legacy regex verbatim.
+
+### Two corrections to the previous handoff's alternatives list
+
+- **`FB` is not a small increment.** It was listed as one because "`Gtk4::Fixed`
+  works". `Gtk4::Fixed` is only the static half; both bundled uses are the
+  fractional form, and all of that behaviour is in `SFixed`'s `size_allocate`
+  override (`gmusicbrowser_layout.pm:2443`) — precisely the vfunc route D006
+  proves silently ignored. A port needs a layout manager, as `AB` got in D030.
+- **`TB` is not fixture-only.** Recorded as having one bundled use holding three
+  unimplemented widgets. There are **two** live uses, and `main.layout:22`'s
+  `TBRight` holds `VPRight`, an implemented pane, plus `Context`. It is the most
+  reachable container increment left.
+
+### A counting trap that silently reports nothing
+
+Container names carry **word** suffixes, not just numeric ones: `TBRight`,
+`FBLower`, `NBSidebar1`. A catalog walk filtering `^(TB|FB)\d*$` matches zero
+nodes and looks like "the feature is unused" rather than "my filter is wrong".
+Filter on the `{element}` field, or anchor only the prefix. The documented
+numeric-suffix rule is about *elements* (`Label3` → `Label`); it does not
+describe container declaration names.
+
+### What did NOT change, and why
+
+`contrib.layout:78` has `#VolumeIcon #_VolumeSlider(horizontal=1)` mid-line, and
+the catalog counts both as widget instances. That looked like the same class of
+defect. It is not: legacy strips only whole-line comments (`ReadLayoutFile`:
+`next if m/^#/`) and `InitLayout` turns each unresolvable name into a
+`Layout::PlaceHolder`, so the parser already agrees with legacy. **Checking the
+legacy behaviour before "fixing" it is what kept this from becoming a D002
+violation.** The instance total is therefore 1161, not 1159.
+
+### Verification
+
+- `make test-modernization` 473 → **484**, 0 skips.
+- `make test-gtk4` unchanged at **346** TAP (340 executed + 6 pre-existing M1
+  skips; per file 18/4/84/166/74, counted from `prove -v`).
+- `make test-gtk3` passes, exit 0.
+- Pristine `git archive HEAD` comparison: **11 of 56** fail, exactly the new
+  assertions, 45 controls passing on both trees.
+- **GTK3 exposure is nil and was checked, not assumed:**
+  `gmusicbrowser_layout_parser.pm` is required only by `gmusicbrowser_gtk4.pl`.
+  GTK3 reads layouts through its own `ReadLayoutFile`/`InitLayout`. `make
+  test-gtk3` was run regardless.
+
+### Still true after this increment
+
+The song-field state path remains the bottleneck and is **unstarted**. It needs
+a documented extension to `FRONTEND_CONTRACT.md` — frozen for the first slice —
+because the contract can say *which* song is current (`CurSong` emits
+`{id=>...}`) but has no way to resolve an ID to field values. It also needs a
+fixture song source, since `gmusicbrowser_gtk4.pl` has no library at all. Scope
+it with the user before writing code.
+
+## Earlier session: three increments and a progress overview
 
 - the layout-wide `DefaultFont`/`DefaultFontColor` globals are now inherited
   by every label (**D032**), closing D031's deferred alternative 5;
@@ -23,7 +92,7 @@ layout's `Icon=` metadata, or a widget instance from a size-group declaration
 that merely names one. The reliable method is to walk the parser's own
 catalog.
 
-## This session's third increment: `HSize`/`VSize` size groups
+## Earlier session, third increment: `HSize`/`VSize` size groups
 
 Found by chasing a discrepancy, which is worth noting as a method: the recorded
 widget instance counts disagreed with the parser's, and the reason turned out
@@ -84,7 +153,7 @@ rather than warned about as the legacy does (`:1068`), and the members that
   request`, the two "does not become a root/widget" assertions, and the
   `Destroy` bookkeeping.
 
-## This session's second increment: a static `markup=`
+## Earlier session, second increment: a static `markup=`
 
 `markup=` looked like the largest remaining prize and the one thing needing the
 song-field state path. Reading `Layout::Label` first showed it is **two
@@ -186,7 +255,7 @@ in their `markup=` values is a real field — `%a` 13, `%t` 13, `%l` 12, `%s` 7,
   on the applied, refused, and field-bearing paths. Controls, but they guard the
   one way this mechanism could leave a visible artifact.
 
-## This session's first increment: layout-level option inheritance
+## Earlier session, first increment: layout-level option inheritance
 
 `DefaultFont` and `DefaultFontColor` are layout properties, not widget
 options. Legacy `InitLayout` reads them into `{global_options}`

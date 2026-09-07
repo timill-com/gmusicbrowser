@@ -286,6 +286,13 @@ Evidence recorded so far, against the system
   `set_scrollable`, `set_tab_pos`, `popup_enable`, and
   `set_tab_reorderable` all work. So the legacy `TB` container is portable;
   `NB` is gated on `Layout::NoteBook`'s own subsystem, not on the binding.
+- **`Gtk4::Fixed` covers only the static half of the legacy `FB`.** Both
+  bundled `FB` uses are the fractional form (`.1,0,.8,0`), whose dynamic
+  position and size are computed in `SFixed`'s `size_allocate` override
+  (`gmusicbrowser_layout.pm:2443`) — the vfunc route this entry records as
+  silently ignored. So "`Gtk4::Fixed` works" does **not** make `FB` a small
+  increment; it needs a composed layout manager as `AB` does under D030. See
+  D035, which fixed the parser side.
 - **`Gtk4::Fixed` works, but `get_child_position` reads `0 0` until the widget
   is mapped.** After `put($child,10,20)` it returns `0 0`, and only after the
   window is presented and the main loop has run does it return `10 20`.
@@ -1952,6 +1959,92 @@ differ: widgets *declared in a layout's own block* (`Next` 34) versus
 *instances across all layouts* (`Next` 36), which counts again whatever a
 derived layout inherits — six bundled layouts use `based on`. This document and
 `PROGRESS.md` use the own-declaration basis.
+
+## D035 — The neutral parser applies the `FB` position prefix
+
+Status: **Accepted**
+
+Context:
+
+`Layout::Parser::_extract_children` translates a container's packing prefix
+before the child name. It had a branch for `HB`/`VB`, one for `HP`/`VP`, and one
+for `TB`, matching three of the six `Prefix` regexes in `%Layout::Boxes::Boxes`
+(`gmusicbrowser_layout.pm:2276-2322`). The `FB` one at `:2322` had no
+counterpart, so the coordinate token was never consumed as a prefix.
+
+The consequence was not a missing feature but a **silently wrong parse**, with
+**0 diagnostics**. `FBLower= .1,0,.8,0 HBLower` produced two children:
+
+| | pristine parser | legacy `::ExtractNameAndOptions` |
+|---|---|---|
+| children | **2** | **1** |
+| first child name | `.1,0,.8,0` | `HBLower` |
+| first child element | `.1,0,.8,` — trailing digit stripped as a suffix | — |
+| first child kind | `widget` | — |
+| `HBLower` packing | `''` | `.1,0,.8,0` |
+
+The truncated element is the numeric-suffix rule (`$element=~s/\d+$//`) firing
+on a coordinate, which is what makes the phantom look like a plausible widget
+name rather than obvious corruption.
+
+Both bundled uses are in `fullscreen.layout` (`:18` and `:39`) and both are
+`.1,0,.8,0` — the **fractional** form, which is `SFixed_dynamic_pos` plus
+`SFixed_dynamic_size`. So a correct prefix is a prerequisite for any `FB` port,
+not merely a counting correction.
+
+Decision:
+
+`_extract_children` gains an `FB` branch using the legacy regex unchanged. The
+prefix becomes `{packing}{raw}` exactly as the other four container families do,
+and the renderer remains free to interpret or report it.
+
+Alternatives:
+
+1. Leave it and let a future `FB` increment fix the parser at the same time.
+   Rejected: the defect corrupts the catalog *today* for anything walking it,
+   and every recorded instance count is derived from that walk.
+2. Emit a diagnostic for an unrecognised prefix instead of parsing it.
+   Rejected: legacy accepts these layouts silently, and D002 makes the syntax a
+   compatibility API — the parser's job is to agree with legacy, not to
+   editorialise.
+
+Consequences:
+
+The bundled widget-instance total drops from **1163** to **1161**; implemented
+instances are unchanged at **235**, so coverage moves 20.2% → 20.24%. Nothing
+else in the catalog moves: 76 layout declarations, 19 skins, 0 errors.
+
+**`FB` is still not portable, and this entry does not make it so.** `SFixed`
+(`gmusicbrowser_layout.pm:2443`) implements the whole dynamic position/size
+behaviour in a `size_allocate` vfunc override, and D006 records that layout
+vfunc overrides on a `Gtk4::Widget` subclass are silently ignored through this
+binding. A future `FB` port must therefore compose a layout manager, as D030 did
+for `AB`. An earlier handoff listed `FB` as a small increment because
+"`Gtk4::Fixed` works"; `Gtk4::Fixed` is only the static half.
+
+**A mid-line `#` is deliberately not treated as a comment.** `contrib.layout:78`
+carries `#VolumeIcon #_VolumeSlider(horizontal=1)`, which the catalog reports as
+two widget instances. That looked like a second defect of the same class, but
+legacy strips only whole-line comments (`ReadLayoutFile`: `next if m/^#/`), and
+`InitLayout` then turns each unresolvable name into a `Layout::PlaceHolder`. The
+parser reproduces legacy exactly, so it was left alone. Two of the remaining
+non-alphabetic catalog entries are this, not corruption.
+
+Evidence or removal condition:
+
+`t/02_LayoutParser.t` covers the fractional bundled shape, the integer shape,
+and the negative/fractional four-value shape, plus that the child is still
+recognised as a `container_ref` and keeps its base element. Expected values were
+taken by running the legacy `::ExtractNameAndOptions` with the legacy `FB`
+regex, not from the new implementation.
+
+Against a pristine `git archive HEAD` tree with only the test and fixture
+overlaid, `t/02_LayoutParser.t` fails **11 of 56** — exactly the new
+assertions, with the remaining 45 passing on both trees as controls. The
+pristine failure values are the phantom-widget symptom itself: `got '2' /
+expected '1'` for the child count, `got '.1,0,.8,0' / expected 'HBinner'` for
+the name, `got 'widget' / expected 'container_ref'` for the kind, and `got '' /
+expected '.1,0,.8,0'` for the packing.
 
 ## Decision template
 
