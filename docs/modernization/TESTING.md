@@ -10,14 +10,14 @@ make test-modernization
 
 This runs the neutral layout parser, frontend contract and lifecycle, legacy
 adapter and lifecycle integration, and GTK4 renderer contract tests. On
-2026-09-07 it reported 458 executed assertions passed and no skips. Running
+2026-09-07 it reported 473 executed assertions passed and no skips. Running
 totals: 269 two sessions ago, 298 after `Next`/`Prev`, 315
 after `Filler`, 317 after the shared labels fixture, 325 after the
 `size=`/`relief=` increment, 342 after label alignment/ellipsize, 344 after the
 `ellipsize=1` normalisation, 364 after the `AB` constraint layout, 395 after
 the label `font=`/`color=` CSS, 415 after the `DefaultFont`/`DefaultFontColor`
-inheritance, 458 after the static `markup=`. The skip count was read from
-`prove -v`, not assumed. The
+inheritance, 458 after the static `markup=`, 473 after the size groups. The
+skip count was read from `prove -v`, not assumed. The
 renderer test uses small in-process GTK doubles; it proves the
 parser/renderer/command wiring without claiming that a real GTK4 binding or
 display passed.
@@ -76,8 +76,8 @@ before [move-handle](https://docs.gtk.org/gtk4/signal.Paned.move-handle.html).
 
 `t/gtk4/30_Box.t` adds real `HB`/`VB` packing geometry to the runner, plus the
 `AB`, label alignment, and label styling coverage. On 2026-09-07, after the
-static `markup=`, the full
-`make test-gtk4` run reported 337 TAP results: 331 executed assertions passed
+`HSize`/`VSize` size groups, the full
+`make test-gtk4` run reported 346 TAP results: 340 executed assertions passed
 and the same six feasibility probes were skipped, 0 failures. The skips were
 counted from `prove -v` and are the same six M1 probes as before. Running
 totals for the same command: 173 results before `Next`/`Prev`, 184 after it,
@@ -85,8 +85,9 @@ totals for the same command: 173 results before `Next`/`Prev`, 184 after it,
 `size=`/`relief=`, 258 after label alignment, 261 after the `ellipsize=1`
 normalisation, 287 after the `AB` constraint layout, 304 after the label
 `font=`/`color=` CSS, 323 after the inheritance, 337 after the static
-`markup=`. Per file: 18 binding, which is
-where all six skips live, 4 proof-of-life, 84 pane, 157 box, 74 icon.
+`markup=`, 346 after the size groups. Per file: 18 binding, which is
+where all six skips live, 4 proof-of-life, 84 pane, 166 box, 74 icon. The
+per-file figures were measured by running each file alone, not by subtraction.
 
 **Two GTK `Failed to set text ... from markup` warnings are expected** in this
 run, one per refused value in `t/layouts/markup.layout`. They are GTK warnings
@@ -225,6 +226,32 @@ Five things to know before extending them:
   also had to be corrected to report `''` rather than `undef` from `get_text`
   on a fresh `Label->new('')`, which is what the real binding does.
 - **Two GTK warnings are emitted by these tests** and are expected; see above.
+
+The `HSize`/`VSize` size group assertions (D034) are physical on Wayland and
+construction plus bookkeeping offline, since the offline doubles have no layout
+pass and cannot equalise anything. Against the previous renderer,
+`t/gtk4/30_Box.t` fails **6 of 166** on real Wayland and
+`t/04_Gtk4LayoutRenderer.t` fails **8 of 308** offline. Pristine failure values
+confirmed as the right reason: `got 7 / expected 180` for the equalisation,
+`21` against `40` and `7` against `120` for the size requests.
+
+Three things to know before extending them:
+
+- **The offline block must be guarded against an undef dereference.**
+  `@{$renderer->{size_groups}}` dies on a renderer that creates no groups,
+  which aborted the pristine run at the first new assertion and hid the other
+  fourteen — while reporting everything before it as passing. `|| []` is what
+  lets pristine reach and fail them honestly. Same trap as the `Filler`
+  increment's early die.
+- **Two labels compared for equal width must differ naturally.** The first
+  version of `a numbered HSize naming two widgets also groups them` compared
+  two labels that on the old renderer both measured 7 — equal because neither
+  was touched, so it passed against pristine. They now carry clearly different
+  text lengths, and the assertion is paired with one that the shared width
+  exceeds the requested number.
+- **The discriminating control is an ungrouped label in the same row.** Without
+  it, an equalisation assertion could be satisfied by the row's own layout
+  rather than by the group.
 
 Eight offline assertions check that the validation sentinel never survives on
 any label — on the applied, refused, and field-bearing paths. They are controls

@@ -1,17 +1,88 @@
 # Session handoff
 
-Status: the tree is clean. This session did two increments, both on
-`Layout::Label`:
+Status: the tree is clean. This session did three increments and added a
+progress overview:
 
 - the layout-wide `DefaultFont`/`DefaultFontColor` globals are now inherited
   by every label (**D032**), closing D031's deferred alternative 5;
-- a **static** `markup=` is now applied (**D033**), which also corrects the
-  recorded `markup=` usage count from 76 to 56 real layout options.
+- a **static** `markup=` is now applied (**D033**);
+- the legacy `HSize`/`VSize` size groups are applied through
+  `Gtk4::SizeGroup` (**D034**).
 
-Read D033 before scoping any further option count. The 76 was arithmetically
-right for its grep and still wrong as a figure for a renderer increment,
-because it mixed layout options with SongTree drawing-layer uses in skin
-blocks and a commented-out line.
+**New: `docs/modernization/PROGRESS.md`** is the "where are we overall" view —
+measured coverage, what is implemented, the current bottleneck, and the test
+position. It is linked from `MODERNIZATION.md` and required by `AGENTS.md`.
+Start there; this file is the working notes and the checklist is the per-row
+detail.
+
+**Read D033 and D034 before letting any option or instance count drive a
+decision.** Between them they correct seven recorded figures, and every error
+had the same cause: a grep over `layouts/` cannot tell a layout block from a
+`{Group}` skin block, a live line from a comment, a widget's `icon=` from the
+layout's `Icon=` metadata, or a widget instance from a size-group declaration
+that merely names one. The reliable method is to walk the parser's own
+catalog.
+
+## This session's third increment: `HSize`/`VSize` size groups
+
+Found by chasing a discrepancy, which is worth noting as a method: the recorded
+widget instance counts disagreed with the parser's, and the reason turned out
+to be an unimplemented feature.
+
+Size groups are `gmusicbrowser_layout.pm:1056-1070`. The parser already
+recognised the `[HV]Size\d*` spelling and kept them in `{definitions}`,
+correctly outside `{nodes}` since they declare no container. The renderer never
+read them. **27** declarations across the bundled layouts.
+
+`GtkSizeGroup` survived into GTK4 unchanged, so this is a **direct, lossless**
+translation — the first such in a while. Measured: all four modes construct,
+`add_widget` raises a 36px label to a grouped 180px, `remove_widget` reverts
+it, `get_mode`/`get_widgets` read back.
+
+Three details that matter:
+
+- **A leading number naming a single widget creates no group at all.** That is
+  the `next if @names==1` early exit at `:1063`, and it is **12 of the 27**
+  bundled uses — the common case, not an edge one. Implementing only the
+  grouping would have missed the majority.
+- **Where both apply, the group wins.** `HSize1= 120 Text5 Text6` requests 120
+  and then groups, so the shared width is the widest member's natural width,
+  which can exceed 120.
+- **Groups are applied after the tree is built**, as the legacy does, because a
+  declaration names widgets *and containers* that must already exist. Both are
+  in the same `{widgets}` hash, matching the legacy's single hash, so
+  `VSize0= 300 HBCover` resolves.
+
+An unresolvable name is recorded through a new `UnhandledSizeGroups` accessor
+rather than warned about as the legacy does (`:1068`), and the members that
+*can* be resolved are still grouped.
+
+### Two test traps this increment hit, both already recorded in other forms
+
+- **The offline block aborted the whole file and hid fourteen assertions.**
+  `@{$renderer->{size_groups}}` dies on a renderer that creates no groups, so
+  the pristine run stopped at the first new assertion having reported
+  everything before it as passing. Guarding with `|| []` is what lets pristine
+  reach and fail them honestly. Same trap the `Filler` increment recorded.
+- **One assertion was vacuous and pristine caught it.** `is($t5w,$t6w)`
+  compared two labels that on the old renderer *both* measured 7 — equal
+  because neither was touched. The fixture now gives them clearly different
+  natural widths, and the assertion is paired with one that the shared width
+  exceeds the requested number. Same class as D030's two.
+
+### Verification for this increment
+
+- `t/gtk4/30_Box.t` fails **6 of 166** against pristine on real Wayland;
+  `t/04_Gtk4LayoutRenderer.t` fails **8 of 308** offline.
+- Pristine failure values confirmed as the right reason: `got 7 / expected 180`
+  for the equalisation, `21` against `40` and `7` against `120` for the
+  requests.
+- Only `UnhandledSizeGroups` needs stubbing into the pristine copy;
+  `_ApplySizeGroups` was confirmed absent before the comparison was trusted.
+- Controls passing on both trees: `an ungrouped label in the same row keeps its
+  own width`, `a widget named by no numbered size group keeps an unset
+  request`, the two "does not become a root/widget" assertions, and the
+  `Destroy` bookkeeping.
 
 ## This session's second increment: a static `markup=`
 
@@ -245,9 +316,12 @@ the decision gate on each row without advancing it. No row was advanced to
 
 Last session: 2026-09-07. Branch `gtk4-alpha`.
 
-**Decision state.** D023–D033 are all **Accepted**. Four entries remain
-**Proposed** — D009, D011, D012, D019 — and those are pre-existing and
-unrelated to the layout rows. Do not mistake them for a cleared backlog.
+**Decision state.** D023–D034 are all **Accepted**. **Eight** entries are
+unresolved, all pre-existing and none blocking a layout increment: D006, D007,
+D008 and D010 are **Open**, and D009, D011, D012 and D019 are **Proposed**.
+An earlier revision of this line named only the four Proposed ones and so
+undercounted; D006 (the M1 binding gate) and D010 (SongTree architecture) are
+the two that matter for the port's shape. See PROGRESS.md for the table.
 
 Read `MODERNIZATION.md` and `AGENTS.md` first. This file only records where the
 previous session stopped and what the next one should verify before continuing.
@@ -618,6 +692,9 @@ Everything is committed. For the number of commits past `master`, run
 `git rev-list --count master..HEAD` rather than trusting a figure here.
 Newest first:
 
+	0b33714 gtk4: apply the legacy HSize and VSize size groups
+	cd219e7 docs: correct the claim that gmusicbrowser.pl is unmodified
+	0af4767 docs: record D033 and correct the markup usage count
 	23ea469 gtk4: apply a static markup= on a label
 	2027830 docs: record D032 and the layout option inheritance results
 	1bf528a gtk4: inherit the layout-wide DefaultFont and DefaultFontColor
@@ -648,11 +725,12 @@ Newest first:
 	d4c87d0 agents file
 	774aa2e initial plan
 
-Neither of this session's increments touched shared code. Both changed
+None of this session's three increments touched shared code. All three changed
 `gmusicbrowser_gtk4_layout.pm`, `t/04_Gtk4LayoutRenderer.t`, and
-`t/gtk4/30_Box.t`; the first added `t/layouts/inherit.layout` and the second
-`t/layouts/markup.layout`. Documentation is committed separately from code, as
-before.
+`t/gtk4/30_Box.t`, and each added one fixture — `t/layouts/inherit.layout`,
+`t/layouts/markup.layout`, `t/layouts/sizegroups.layout`. The session also
+added `docs/modernization/PROGRESS.md`. Documentation is committed separately
+from code, as before.
 
 The `font=`/`color=` CSS increment before it changed
 `gmusicbrowser_gtk4_layout.pm`, `t/04_Gtk4LayoutRenderer.t`,
@@ -881,16 +959,20 @@ value outside the mapping.
 are left-aligned rather than centred, and `xalign`/`yalign`/`ellipsize` are
 applied. See D028, now Accepted. A label's `ellipsize=1` is normalised to
 `'end'` under its alternative 2, which is the one accepted parity exception in
-the renderer: GTK3 leaves such a label un-ellipsized. `%LabelHandled` covers `text`, `markup`, `xalign`, `yalign`,
-`ellipsize`, `minwidth`, `minheight`, `font`, and `color`; `minsize` and
-`expand_max` stay reported, and so does a `markup=` that names a song field or
-cannot be parsed. `font=`/`color=` land through a
-`GtkCssProvider` under D031, with `font=` expressed as a ratio of the desktop
-font rather than as absolute points. Under D032 a label with neither option
-inherits the layout's `DefaultFont`/`DefaultFontColor` through the same
-provider, per option and with the widget's own value winning; an
-untranslatable global is reported through `UnhandledGlobals` rather than
-through the per-widget list.
+the renderer: GTK3 leaves such a label un-ellipsized.
+
+`%LabelHandled` covers `text`, `markup`, `xalign`, `yalign`, `ellipsize`,
+`minwidth`, `minheight`, `font`, and `color`; `minsize` and `expand_max` stay
+reported, and so does a `markup=` that names a song field or cannot be parsed.
+`font=`/`color=` land through a `GtkCssProvider` under D031, with `font=`
+expressed as a ratio of the desktop font rather than as absolute points.
+
+Under D032 a label with neither option inherits the layout's
+`DefaultFont`/`DefaultFontColor` through the same provider, per option and with
+the widget's own value winning; an untranslatable global is reported through
+`UnhandledGlobals` rather than through the per-widget list. Under D034 the
+`HSize`/`VSize` size groups are applied after the tree is built, with an
+unresolvable name reported through `UnhandledSizeGroups`.
 
 Both increments follow the same pattern, and it is worth looking for more of
 it: a legacy `@default_options` value whose GTK4 counterpart differs is a
@@ -1353,27 +1435,32 @@ Commands that were actually run and passed this session:
 	make test-gtk3
 	git diff --check
 
-`make test-modernization`: **458** executed assertions passed, no skips.
+`make test-modernization`: **473** executed assertions passed, no skips.
 Running totals: 269 three sessions ago, 298 after `Next`/`Prev`, 315 after
 `Filler`, 317 after the labels fixture, 325 after `size=`/`relief=`, 342 after
 label alignment, 344 after the `ellipsize=1` normalisation, 364 after the `AB`
 constraint layout, 395 after the label `font=`/`color=` CSS, 415 after the
-`DefaultFont`/`DefaultFontColor` inheritance, 458 after the static `markup=`.
-The skip count was read from `prove -v`, not assumed.
+`DefaultFont`/`DefaultFontColor` inheritance, 458 after the static `markup=`,
+473 after the size groups. The skip count was read from `prove -v`, not
+assumed.
 
-`make test-gtk4` on the real Wayland connection: **337** TAP results,
-comprising **331 executed assertions passed** and the same six pre-existing M1
+`make test-gtk4` on the real Wayland connection: **346** TAP results,
+comprising **340 executed assertions passed** and the same six pre-existing M1
 feasibility probes skipped, 0 failures. Per file: 18 binding (which is where
-all six skips live), 4 proof-of-life, 84 pane, 157 box, 74 icon. Running totals
+all six skips live), 4 proof-of-life, 84 pane, 166 box, 74 icon — measured per
+file, not by subtraction. Running totals
 for the same command: 173 before `Next`/`Prev`, 184 after it, 202 after
 `Filler`, 216 after the `AB` coverage, 246 after `size=`/`relief=`, 258 after
 label alignment, 261 after the `ellipsize=1` normalisation, 287 after the `AB`
 constraint layout, 304 after the label `font=`/`color=` CSS, 323 after the
-inheritance, 337 now. Do not restate this as 331 passing assertions.
+inheritance, 337 after the static `markup=`, 346 now. Do not restate this as
+340 passing assertions.
 
 Two GTK `Failed to set text ... from markup` warnings are expected in this run,
 one per refused value in `t/layouts/markup.layout`. They are GTK warnings, not
-Perl ones, and cannot be suppressed from Perl. Do not hide them. The six skips were counted by copying the runner to
+Perl ones, and cannot be suppressed from Perl. Do not hide them.
+
+The six skips were counted by copying the runner to
 `tools/.verbose-smoke-tmp`, switching `prove` to `-v`, and grepping
 `^ok [0-9]+ # skip` — six matches, all `BLOCKED:` M1 probes in
 `t/gtk4/00_Binding.t`. Not assumed. Note that a copy of the runner placed
@@ -1434,8 +1521,14 @@ produced identical offsets and widths in all three rows; the table is in
 `TESTING.md`. That is a focused packing comparison, not a full GTK3
 application regression pass.
 
-`t/01_ModFileMetadata.t` still fails: it downloads media samples and the
-repository ships none. That is the pre-existing M0 gap, not a regression.
+`t/01_ModFileMetadata.t` **passes on this checkout**, with 10 real assertions
+and no skips — corrected this session, having been recorded as failing for
+several sessions. The repository still ships no samples (`t/samples/` is in
+`.gitignore` and `git ls-files t/samples/` is empty), but this working copy has
+them downloaded. Both facts are true and they are about different things: the
+repository state and this checkout's state. It would still fail on a fresh
+clone, which is why it stays outside the offline target. Check
+`git ls-files t/samples/` before reporting it either way.
 
 ## Toolkit bindings are installed; Wayland requires sandbox access
 
@@ -1643,6 +1736,21 @@ means the reported ~1190px window is not the layout's designed size.
 
 ## Working notes
 
+- **An option or instance count from `grep` over `layouts/` is not a count of
+  anything the renderer sees.** Seven recorded figures were corrected this
+  session (D033, D034), each for the same reason: grep cannot distinguish a
+  `[layout]` block from a `{Group}`/`{Column}` skin block, a live line from a
+  comment, a widget's `icon=` from the layout's `Icon=` metadata or a
+  `tabicon=`, or a widget instance from an `HSize`/`VSize` declaration that
+  merely names one. **Walk the parser's catalog instead**, and state the basis:
+  widgets *declared in a layout's own block* versus *instances across all
+  layouts*, which differ because six bundled layouts use `based on`
+  (`Next` is 34 own, 36 all).
+- **A count discrepancy can be an unimplemented feature.** The size-group
+  increment was found by asking why the recorded instance counts disagreed
+  with the parser's; the answer was that a grep matched a construct the
+  renderer did not implement. Reconcile a disagreement rather than picking the
+  figure that looks right.
 - **Do not infer a precedence from a merge order.** `NewWidget:1162` merges
   `%$global_opt` *last*, which reads as though a layout-wide global outranks a
   widget option. Neither of the two globals lets it: both fall back with `||`

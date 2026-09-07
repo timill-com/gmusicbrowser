@@ -17,6 +17,9 @@ language rewrite.
 
 Detailed planning documents:
 
+- [Progress](docs/modernization/PROGRESS.md) — measured GTK4 port coverage,
+  what is implemented, the current bottleneck, and test position. Start here
+  for "where are we".
 - [Roadmap](docs/modernization/ROADMAP.md) — milestones, ordering, estimates,
   and release gates.
 - [Technical plan](docs/modernization/TECHNICAL_PLAN.md) — current and target

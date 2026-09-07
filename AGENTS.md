@@ -13,6 +13,7 @@ requirements.
 Before substantial work, read:
 
 - `MODERNIZATION.md`
+- `docs/modernization/PROGRESS.md`
 - `docs/modernization/ROADMAP.md`
 - `docs/modernization/TECHNICAL_PLAN.md`
 - `docs/modernization/INVENTORY.md`

@@ -2,6 +2,10 @@
 
 Status: active inventory
 
+For the overall coverage summary — measured element and instance counts, the
+current bottleneck, and test position — see
+[PROGRESS.md](PROGRESS.md). This file holds the per-row detail.
+
 This checklist records GTK4 implementation and verification status. `Rendered`
 is not parity: an item reaches `Parity review` only after its saved options,
 commands, input, focus, accessibility, failure behaviour, and relevant GTK3
@@ -45,6 +49,7 @@ surface. Numeric suffixes retain the base element's behaviour.
 | `xalign=`/`yalign=`/`ellipsize=` on `Label`/`Text` | GTK4 in progress, see D028 (accepted) |
 | `font=`/`color=` on `Label`/`Text` | GTK4 in progress, see D031 (accepted) |
 | static `markup=` on `Label`/`Text` | GTK4 in progress, see D033 (accepted) |
+| `HSize`/`VSize` size groups | GTK4 in progress, see D034 (accepted) |
 | `DefaultFont`/`DefaultFontColor` layout-wide inheritance | GTK4 in progress, see D032 (accepted) |
 | `tip=` tooltip option on the above | GTK4 in progress, literal tips only |
 | `AABox`, `AASearch`, `AddLabelEntry`, `Album`, `AlbumBox`, `AlbumSearch`, `Artist`, `ArtistBox`, `ArtistPic`, `ArtistSearch`, `BContext`, `Button`, `Choose`, `ChooseRandAlbum`, `Comment`, `Connections`, `Context`, `Cover`, `Date`, `EditList`, `EditListButtons`, `EmptyList`, `Equalizer`, `EqualizerPresets`, `EqualizerPresetsSimple`, `EventBox`, `FBox`, `FLock`, `FPane`, `Filter`, `FilterBox`, `FilterLock`, `FilterPane`, `Fullscreen`, `HSeparator`, `HistItem`, `LSortItem`, `LabelTime`, `LabelToggleButtons`, `LabelVol`, `LabelsIcons`, `LayoutItem`, `Length`, `Lock`, `LockAlbum`, `LockArtist`, `LockSong`, `MainMenuItem`, `MenuItem`, `OpenBrowser`, `OpenContext`, `OpenQueue`, `PFilterItem`, `PSortItem`, `PictureBrowser`, `PlayFilter`, `PlayItem`, `PlayList`, `PlayOrderCombo`, `PlayingTime`, `Pos`, `Pref`, `Progress`, `ProgressV`, `Queue`, `QueueActions`, `QueueFilter`, `QueueItem`, `QueueList`, `Refresh`, `Repeat`, `ResetFilter`, `Scale`, `SeparatorMenuItem`, `ShuffleList`, `SimpleSearch`, `SongInfo`, `SongList`, `SongSearch`, `SongTree`, `Sort`, `Stars`, `TabbedLists`, `Time`, `TimeBar`, `TimeSlider`, `Title`, `Title_by`, `TogButton`, `ToggleButton`, `Total`, `VProgress`, `VSeparator`, `Visuals`, `Vol`, `VolBar`, `VolSlider`, `Volume`, `VolumeBar`, `VolumeIcon`, `VolumeSlider`, `Year` | Not started |
@@ -72,8 +77,9 @@ parity review. `HB`/`VB` translate the legacy packing prefix set (padding
 digits, `_` expand, `-` end packing, `.` fill off). Expand, fill, and padding
 now act on the packing axis, and `-` reproduces `pack_end` far-edge placement,
 with allocated offsets measured against the unchanged GTK3 `BoxPack` on the
-same fixture. Homogeneous boxes, `spacing` beyond the legacy 1, size groups,
-and `expand_max`-style widget options are not covered.
+same fixture. Homogeneous boxes, `spacing` beyond the legacy 1, and
+`expand_max`-style widget options are not covered. Size groups **are** now
+covered, as D034 — see the paragraph below.
 `HP`/`VP` implement `_` resize, `+` shrink-off, and the `size` option.
 Panes expose the legacy `SaveOptions` callback, recording both sides as `N-M`
 and restoring `N`, `N-M`, or `N_M`. Coalesced position/bounds notifications
@@ -90,11 +96,16 @@ Adwaita and so do not follow the host theme on stock GNOME.
 legacy `gtk-*` mapping, bundled icons, alias fallback, the text fallback for
 an unresolvable name, and the symbolic fallback against a theme pinned to
 Adwaita. `Play`, `Quit`, and the `%Buttons` widgets accept icons. The bundled
-layouts contain 103 `icon=` and 17 `stock=` uses; exactly one of those 120
-lands on an implemented widget (`Quit1(icon=gmb-turnoff)`), so the rest still
-belong to widgets that are not implemented yet. An earlier revision recorded 99
-`icon=`; the count on this tree is 103. Icon artwork is unchanged, so this
-stays inside D013.
+layouts contain **88** `icon=` and **17** `stock=` uses; exactly one of those
+105 lands on an implemented widget (`Quit1(icon=gmb-turnoff)`, verified against
+the parser's catalog), so the rest still belong to widgets that are not
+implemented yet. Icon artwork is unchanged, so this stays inside D013.
+
+Earlier revisions recorded 99 and then 103 `icon=`. Both were grep totals: a
+raw `[(,] *icon=` reports 93, of which 5 are in comments or `{Group}` skin
+blocks, and counting the 5 `Icon=` layout-metadata lines and 10 `tabicon=`
+options as well is how 103 arose. `tabicon=` and `Icon=` are different things
+from a widget's `icon=`. See D034 on stating a counting basis.
 
 Stateless command buttons are built from a `%Buttons` table in the renderer
 that keeps the field names `%Layout::Widgets` uses, so the two can be compared
@@ -168,7 +179,7 @@ has no `activate` and dispatches no command. It reads `widget`, `togglegroup`,
 and `resize`, and drives `::get_layout_widget`, `GetShowHideState`, `ShowHide`,
 and `Hide`, plus a `::Watch($self,'HiddenWidgets',...)` subscription.
 
-All **39** `ToggleButton`/`TogButton` option groups in `layouts/` carry
+All **35** `ToggleButton`/`TogButton` option groups in `layouts/` carry
 `widget=`. There is not one plain toggle among them. So porting `ToggleButton`
 means porting the layout show/hide subsystem first, which is a much larger unit
 than a `%Buttons` entry and is not a button increment at all. It reuses
@@ -245,8 +256,11 @@ The `Layout::Label` family is `Text`, `Pos`, `Title`, `Title_by`, `Artist`,
 implemented.
 
 `Filler` is the legacy `Gtk3::HBox->new`, so GTK4 builds it as an empty
-`Gtk4::Box`. It carries no options in any bundled layout: all 102 instances are
-driven purely by their packing prefix, which `_CreateBox` already translates.
+`Gtk4::Box`. It carries no options in any bundled layout: all **94** instances
+are driven purely by their packing prefix, which `_CreateBox` already
+translates. (Recorded as 102 until D034; a raw grep also matched the 8
+`Filler` names appearing on `HSize`/`VSize` size-group lines, which
+instantiate nothing.)
 Measured on real Wayland, an expanding `Filler` absorbs 564 of 600px while a
 plain one is allocated 0px with its declared padding intact.
 
@@ -259,6 +273,24 @@ of its own keeps whichever dimension the layout did not name; both toolkits
 spell an unset dimension `-1`, which was verified against GTK3 rather than
 assumed. `hover_layout`, the other half of `ApplyCommonOptions`, is **not**
 ported: it needs a popup window and its own `GdkWindow`.
+
+The legacy `HSize`/`VSize` size groups are now applied, as **D034** (status
+**Accepted**). GTK4 kept `GtkSizeGroup` unchanged, so the translation is direct
+and lossless: all four modes construct, `add_widget` raises a 36px label to a
+grouped 180px, and `remove_widget` reverts it. The parser already recognised
+the `[HV]Size\d*` spelling and kept these in `{definitions}`, outside
+`{nodes}` since they declare no container; the renderer simply never read them.
+
+There are **27** declarations across the bundled layouts, and both legacy
+shapes are preserved including the early exit at `gmusicbrowser_layout.pm:1063`:
+a leading number is a size request on the group's axis, and a numbered
+declaration naming a **single** widget creates no group at all — 12 of the 27
+uses, so the common case. Where a group is created too, the group wins: the
+shared width is the widest member's natural width, which can exceed the
+requested number. Groups are applied after the tree is built, as the legacy
+does, because a declaration names widgets and containers that must already
+exist. An unresolvable name is recorded through `UnhandledSizeGroups` rather
+than warned about, and the resolvable members are still grouped.
 
 Still unhandled sizing: `maxwidth=` (44 uses) and `maxheight=` (7). Those are
 not general options — in GTK3 they feed `Layout::Label`'s `expand_max`
@@ -358,9 +390,10 @@ is currently a shape with none of its behaviour. See D026.
 Parser compatibility items are inheritance, empty overrides, continuation
 lines, translations, ordered packing prefixes, quoted and nested options,
 unknown options, aliases, numeric widget suffixes, source locations, SongTree
-columns/groups, default options, size groups, key bindings, `VolumeScroll`, and
+columns/groups, default options, key bindings, `VolumeScroll`, and
 saved per-widget options. These are in **Boundary work** until golden comparison
-against the GTK3 parser is available.
+against the GTK3 parser is available. Size groups were in this list and are now
+implemented under D034.
 
 ## Commands
 

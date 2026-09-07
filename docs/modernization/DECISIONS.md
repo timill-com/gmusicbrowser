@@ -1799,6 +1799,144 @@ including the three malformed classes (unclosed tag, unknown tag, unknown
 entity) and the two validly-empty ones — rather than being written to satisfy
 the test.
 
+## D034 — `HSize`/`VSize` map onto `Gtk4::SizeGroup` unchanged
+
+Status: **Accepted**
+
+Context:
+
+The legacy layout language has size groups: a declaration named `HSize`,
+`VSize`, or either with a numeric suffix lists widgets that should share a
+minimum size (`gmusicbrowser_layout.pm:1056-1070`). There are **27**
+declarations across the bundled layouts, in four shapes, all exercised:
+
+| shape | uses | meaning |
+|---|---:|---|
+| `HSize0= Filler0 LockArtist LockAlbum` | 10 | group the named widgets |
+| `VSize0= 300 HBCover` | 12 | size request only — **no group** |
+| `HSize1= 120 Text5 Text6` | 5 | size request **and** group |
+
+The parser already recognised the spelling (`_is_definition`, `[HV]Size\d*`)
+and kept these in `{definitions}`, correctly outside `{nodes}`/`{roots}` since
+they declare no container. The renderer simply never read them.
+
+`GtkSizeGroup` survived into GTK4 unchanged. Measured through this binding: all
+four modes (`horizontal`, `vertical`, `both`, `none`) construct, `add_widget`
+raises a 36px label to a grouped 180px, `remove_widget` returns it to 36, and
+`get_mode`/`get_widgets` read back. So this is a **direct, lossless**
+translation — unlike `AB` (D025/D030) or the icon sizes (D027).
+
+Decision:
+
+`Render` calls `_ApplySizeGroups` **after** building the tree, which is the
+legacy order and is necessary because a declaration names widgets and
+containers that must already exist. Containers are registered in the same
+`{widgets}` hash as widgets, exactly as the legacy uses one hash for both, so
+`VSize0= 300 HBCover` resolves.
+
+Both legacy shapes are preserved exactly, including the early exit at
+`:1063`:
+
+- A leading all-digits token is a size request on the group's axis, leaving the
+  other dimension `-1` — which both toolkits spell the same way, already
+  verified for `minwidth=`.
+- `next if @names==1` means a numbered declaration naming a single widget
+  creates **no group at all**. That is 12 of the 27 bundled uses, so it is the
+  common case rather than an edge one.
+- Where a group is created as well, the group wins: the shared width is the
+  widest member's natural width, which can exceed the requested number.
+
+Legacy warns `Can't add unknown widget '$n' to sizegroup` for a name it cannot
+resolve (`:1068`). The renderer records it through a new `UnhandledSizeGroups`
+accessor instead, since it has no diagnostics channel of its own, and still
+groups the members it *can* resolve rather than discarding the declaration.
+
+`Destroy` releases the groups, which hold references to their widgets.
+
+Alternatives:
+
+1. Translate a size group into explicit `set_size_request` calls computed from
+   the members' measured minima. Rejected: it would freeze the size at
+   construction, where a real size group keeps tracking as content changes, and
+   `Gtk4::SizeGroup` exists and does it properly.
+2. Ignore the numeric shortcut and only group. Rejected: 12 of the 27 bundled
+   uses are exactly that shortcut with no group, so ignoring it would drop the
+   majority case.
+3. Warn on an unresolvable name as the legacy does. Rejected for consistency
+   with the established `Unhandled` convention — the renderer reports rather
+   than warns, so a caller decides how to surface it.
+
+Consequences:
+
+The two options `maxwidth=`/`maxheight=` are still unimplemented and are
+unrelated to this: they feed `Layout::Label`'s `expand_max` scrolling
+machinery, not a size request.
+
+This is the first thing the renderer reads from `{definitions}` other than
+container declarations, which is a small widening of what the catalog surface
+means to it — `{metadata}` became load-bearing under D032 the same way.
+
+Evidence or removal condition:
+
+`t/gtk4/30_Box.t` measures that a grouped short label is raised to a long
+label's minimum width while an **ungrouped** long label in the same row keeps
+its own, that a numbered `VSize` raises the named widget's height, and that a
+numbered `HSize` naming two widgets both requests and groups.
+`t/04_Gtk4LayoutRenderer.t` covers the group count and modes, the request/no-group
+early exit, the unknown-name reporting, and that `Destroy` releases them.
+
+Run against the previous renderer, `t/gtk4/30_Box.t` fails **6 of 166** on real
+Wayland and `t/04_Gtk4LayoutRenderer.t` fails **8 of 308** offline. Pristine
+failure values confirmed as the right reason: `got 7 / expected 180` for the
+equalisation, `21` against `40` and `7` against `120` for the requests. Only
+the `UnhandledSizeGroups` accessor needs stubbing into the pristine copy;
+`_ApplySizeGroups` must be confirmed absent before the comparison is trusted.
+
+Two things worth knowing before extending these assertions:
+
+- **The offline block had to be guarded against an undef dereference.**
+  `@{$renderer->{size_groups}}` dies on a renderer that creates no groups,
+  which aborted the file at the first new assertion and hid the other
+  fourteen. Guarding with `|| []` is what lets pristine reach and fail them
+  honestly. This is the same "an abort hides your other assertions" trap the
+  `Filler` increment recorded.
+- **One assertion was vacuous and pristine caught it.** `is($t5w,$t6w)`
+  compared two labels carrying different-length text — but on the old renderer
+  *both* measured 7, equal because neither was touched, so it passed. The
+  fixture now gives them clearly different natural widths, and the assertion is
+  paired with one that the shared width exceeds the requested number. Same
+  class as D030's two vacuous assertions.
+
+### The counting correction this increment produced
+
+Chasing a discrepancy between the recorded widget instance counts and the
+parser's own found that **a raw `grep -o` also matches size-group
+declarations**, which name existing widgets and instantiate nothing. Five
+recorded figures were inflated by that, plus comments, `Name=` prose and option
+text:
+
+| element | recorded | actual instances | inflation |
+|---|---:|---:|---|
+| `Filler` | 102 | **94** | 8 names on `HSize`/`VSize` lines |
+| `MenuItem` | 103 | **99** | 4 |
+| `ToggleButton` | 39 | **35** | 4 |
+| `SeparatorMenuItem` | 32 | **30** | 2 |
+| `LockAlbum`, `LockArtist` | 22 each | **15** each | 7 each |
+
+`LockAlbum` was verified by listing all 22 occurrences by hand: 7 are on
+`HSize0=` lines. The three figures earlier sessions derived by careful
+tokenizing — `Next` 34, `Prev` 29, `Stop` 20 — **match the parser exactly** and
+need no correction.
+
+An earlier revision of the handoff said these figures "reproduce and should not
+be corrected". They do reproduce as grep output; they are not widget counts.
+
+**State the basis with any instance count**, because two defensible bases
+differ: widgets *declared in a layout's own block* (`Next` 34) versus
+*instances across all layouts* (`Next` 36), which counts again whatever a
+derived layout inherits — six bundled layouts use `based on`. This document and
+`PROGRESS.md` use the own-declaration basis.
+
 ## Decision template
 
 Copy this section for new decisions:
