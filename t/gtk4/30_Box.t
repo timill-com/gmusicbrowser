@@ -231,4 +231,56 @@ _drain();
 	_drain();
 }
 
+# AB alignment as real positions, which D025 requires before an AB row can move
+# past 'GTK4 in progress'. GTK4 has no GtkAlignment, so the legacy four numbers
+# become halign/valign on the child; only an allocation shows they took effect.
+{	my $afixture=File::Spec->catfile('t','layouts','align.layout');
+	my $acatalog=Layout::Parser::ParseFiles(files=>[$afixture]);
+	is(scalar @{$acatalog->{diagnostics}},0,'align fixture parses without diagnostics');
+	my $arenderer=Layout::Renderer::Gtk4->new
+	(	catalog=>$acatalog,
+		frontend=>$frontend,
+		labels=>GMB::Test::RendererLabels::labels(),
+	);
+	my $aroot=$arenderer->Render('gtk4 align');
+	$aroot->set_direction('ltr');
+	my $awindow=Gtk4::Window->new;
+	$awindow->set_default_size(600,120);
+	$awindow->set_child($aroot);
+	$awindow->present;
+	ok(_wait_for_window($awindow),'GTK4 window mapped before alignment assertions');
+	_drain();
+
+	# each AB is an expanding sibling, so each gets an equal slot; the child's
+	# offset inside its own AB is what the alignment decides
+	my %pos;
+	for my $case (['ABstart','Label'],['ABcenter','Label2'],['ABend','Label3'],['ABfill','Label4'])
+	{	my ($box,$child)=@$case;
+		my $b=$arenderer->Widget($box);
+		my $c=$arenderer->Widget($child);
+		my ($ok,$x)=$c->translate_coordinates($b,0,0);
+		$pos{$box}={ok=>$ok, x=>$x, slot=>$b->get_width, child=>$c->get_width};
+		ok($ok,"$box child received a real allocation");
+	}
+	cmp_ok($pos{ABstart}{slot},'>',$pos{ABstart}{child}*2,
+		'an expanding AB slot is wider than its child, so alignment is observable');
+	is($pos{ABstart}{x},0,'xalign=0 with xscale=0 puts the child at the near edge');
+	is($pos{ABend}{x}+$pos{ABend}{child},$pos{ABend}{slot},
+		'xalign=1 with xscale=0 puts the child at the far edge');
+	cmp_ok(abs($pos{ABcenter}{x}+$pos{ABcenter}{child}/2-$pos{ABcenter}{slot}/2),'<=',1,
+		'xalign=.5 with xscale=0 centres the child in its slot');
+	# the default xscale=1 fills instead of aligning, so the child spans the slot
+	is($pos{ABfill}{child},$pos{ABfill}{slot},
+		'an AB with the default xscale=1 fills its slot rather than aligning');
+	is($pos{ABfill}{x},0,'a filling AB child starts at the near edge');
+	# the three aligned children must actually differ, or the assertions above
+	# could all be satisfied by one accidental position
+	isnt($pos{ABstart}{x},$pos{ABend}{x},'start and end alignment differ');
+	isnt($pos{ABcenter}{x},$pos{ABend}{x},'centre and end alignment differ');
+
+	$arenderer->Destroy;
+	$awindow->destroy;
+	_drain();
+}
+
 done_testing;

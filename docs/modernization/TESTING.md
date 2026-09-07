@@ -71,11 +71,12 @@ before [move-handle](https://docs.gtk.org/gtk4/signal.Paned.move-handle.html).
 
 `t/gtk4/30_Box.t` adds real `HB`/`VB` packing geometry to the runner. On
 2026-09-07, after the `Filler` and size-request increment, the full
-`make test-gtk4` run reported 202 TAP results: 196 executed assertions passed
+`make test-gtk4` run reported 216 TAP results: 210 executed assertions passed
 and the same six feasibility probes were skipped, 0 failures. The skips were
 counted from `prove -v` and are the same six M1 probes as before. Running
 totals for the same command: 173 results before `Next`/`Prev`, 184 after it,
-202 now. The box file contributes 52 executed assertions and the icon file 44.
+202 after `Filler`, 216 after the `AB` alignment coverage. The box file
+contributes 66 executed assertions and the icon file 44.
 They read allocated child offsets with
 [translate_coordinates](https://docs.gtk.org/gtk4/method.Widget.translate_coordinates.html);
 `compute_bounds` and `compute_point` are unusable through this binding, which
@@ -241,6 +242,31 @@ than reimplemented.
 
 `hover_layout`, the other half of `ApplyCommonOptions`, is not ported and has
 no test: it needs a popup window and a widget with its own `GdkWindow`.
+
+## `AB` alignment
+
+`t/layouts/align.layout` puts four expanding `AB` containers in one row so each
+gets an equal slot, which makes a child's offset inside its own `AB` the only
+thing the alignment decides. Measured on real Wayland in a 600px window,
+`direction=ltr`:
+
+| `AB` | Slot | Child | Child x | `halign` |
+|---|---:|---:|---:|---|
+| `ABstart` (`xalign=0,xscale=0`) | 150 | 7 | 0 | `start` |
+| `ABcenter` (`xalign=.5,xscale=0`) | 150 | 7 | 71 | `center` |
+| `ABend` (`xalign=1,xscale=0`) | 150 | 8 | 142 | `end` |
+| `ABfill` (default `xscale=1`) | 147 | 147 | 0 | `fill` |
+
+Three clearly distinct positions in identical slots, plus a fill case that
+spans its slot. The test also asserts that the start, centre, and end positions
+differ from each other, so the three cannot all be satisfied by one accidental
+position.
+
+This is **coverage of an implementation that already existed**, not a proof of
+new behaviour: the same file passes unchanged against the preceding commit.
+D025 required it before an `AB` row could be advanced, which is why it was
+added; the row still does not advance, because D025 is Proposed and the
+fractional-alignment gap it documents is still open.
 
 ## Shared test fixtures
 

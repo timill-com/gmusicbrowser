@@ -583,6 +583,137 @@ the bundled layouts — 34 and 29 instances — would render as text labels on
 stock GNOME, which D022 makes a required target. The Wayland assertions accept
 either spelling so they do not pin one theme's convention.
 
+## D025 — `AB` becomes alignment properties on its child
+
+Status: **Proposed**
+
+Gate: before any `AB` row is advanced past `GTK4 in progress`
+
+Context:
+
+The legacy `AB` container is `Gtk3::Alignment->new(xalign,yalign,xscale,yscale)`
+with defaults `.5, .5, 1, 1` (`gmusicbrowser_layout.pm:2333`). `GtkAlignment` was
+deprecated in GTK 3.14 and **removed in GTK4**; its documented replacement is the
+`halign`, `valign`, `hexpand`, `vexpand`, and margin properties that every
+`GtkWidget` now carries. There is no container to construct.
+
+`AB` is a layout-visible identifier under D002, and 14 bundled declarations use
+it. All of them set only `xalign`, `yalign`, or `yscale`.
+
+Decision:
+
+The GTK4 renderer builds `AB` as a plain vertical `Gtk4::Box` holding the single
+child, and translates the four legacy numbers into `halign`/`valign` on that
+child. A scale of 0 means "do not expand", so the corresponding alignment is
+applied; any other scale means "fill". The continuous alignment value is bucketed
+into GTK4's three-valued enum: `<= .25` is `start`, `>= .75` is `end`, otherwise
+`center`.
+
+Alternatives:
+
+1. Implement a custom `GtkWidget` subclass reproducing `GtkAlignment` exactly,
+   including fractional scales. Rejected for now: it needs `measure`/`size_allocate`
+   vfunc overrides through the introspection binding, which D006 has not yet
+   established, for a construct no bundled layout exercises fractionally.
+2. Drop `AB` and require layouts to set alignment on the child directly.
+   Rejected: `AB` is a layout-visible identifier and D002 makes it a
+   compatibility API.
+3. Map `AB` onto `Gtk4::Box` alignment without a wrapper widget at all, so `AB`
+   contributes no box to the tree. Rejected: `AB` can be named as a packing
+   target by its siblings and appears in `$renderer->{widgets}`, so removing the
+   node would change the tree the layout describes.
+
+Consequences — where this is exact and where it is not:
+
+Exact for every bundled layout. The only alignment values that appear anywhere in
+`layouts/` are `0`, `0.0`, `.5`, `0.5`, and `1`, and the only scale values are `0`
+and `0.0`. Each maps onto the GTK4 enum without loss, so no bundled layout is
+approximated.
+
+Two documented losses remain for a hand-written user layout:
+
+- A fractional alignment such as `xalign=0.3` collapses to `start`. GTK3 would
+  position the child 30% of the way across the slack.
+- A fractional scale such as `yscale=0.5` is treated as `fill`. GTK3 would expand
+  the child to half the available slack.
+
+Neither is reachable from a bundled layout, and neither is silently wrong in a way
+a user could mistake for correct behaviour: the child is visibly aligned or
+visibly filled. Until alternative 1 is implemented, an `AB` row cannot be
+advanced past `GTK4 in progress`, because "exact for the layouts we ship" is not
+parity for the layout language.
+
+Evidence or removal condition:
+
+Construction and option handling are covered in `t/04_Gtk4LayoutRenderer.t`
+against in-process doubles. There is no real-Wayland allocation test for `AB`
+alignment yet; that is required before the row moves. Revisit if a user layout is
+found relying on a fractional alignment or scale, which would promote
+alternative 1 from deferred to required.
+
+## D026 — `WB` becomes a plain box, and its purpose is not ported
+
+Status: **Proposed**
+
+Gate: before any `WB` row is advanced past `GTK4 in progress`
+
+Context:
+
+The legacy `WB` container is `Gtk3::EventBox->new` (`gmusicbrowser_layout.pm:2337`).
+`GtkEventBox` was **removed in GTK4**: every `GtkWidget` can now take event
+controllers directly, so a widget no longer needs a wrapper with its own
+`GdkWindow` to receive input.
+
+`WB` exists in gmusicbrowser for exactly one reason, stated in the source at
+`gmusicbrowser_layout.pm:1247`: `hover_layout` "only works with widgets/boxes that
+have their own gdkwindow (put it into a WB box otherwise)". `WB` is the escape
+hatch for that limitation.
+
+Two measurements matter here:
+
+- **No bundled layout uses `WB` at all.** Zero declarations across all 13 files.
+- The three `hover_layout` uses in `layouts/` reach it through the `EventBox`
+  *widget* and the `Cover` widget, not through a `WB` container.
+
+Decision:
+
+The GTK4 renderer builds `WB` as a plain vertical `Gtk4::Box` holding the single
+child, so a layout naming `WB` still parses, still builds, and still produces the
+node its siblings may reference. The `GdkWindow` behaviour it existed to provide
+is **not** ported, and does not need to be: in GTK4 the child can carry its own
+event controllers, which is what removes the original limitation.
+
+`hover_layout` itself is not implemented in the GTK4 renderer — it needs a popup
+window — so `WB`'s reason for existing has no GTK4 consumer yet either.
+
+Alternatives:
+
+1. Reject `WB` with a diagnostic, on the grounds that its purpose no longer
+   exists. Rejected: D002 makes it a layout-visible identifier, and a user layout
+   naming it must keep working even though the bundled ones do not.
+2. Implement `WB` as the widget that owns the hover controllers, folding
+   `hover_layout` into it. Deferred, not rejected: this is the likely correct
+   long-term shape, but it belongs with the `hover_layout` port rather than with
+   the container, and it needs a popup-window design that does not exist yet.
+3. Treat `WB` as a pass-through contributing no widget. Rejected for the same
+   reason as D025 alternative 3: the node can be a packing target.
+
+Consequences:
+
+A layout naming `WB` renders its child in the right place. Anything that depended
+on `WB` supplying a `GdkWindow` does not work, but nothing in the shipped layouts
+does, and the GTK4 replacement for that dependency is event controllers on the
+child rather than a wrapper. A `WB` row cannot be advanced past `GTK4 in
+progress` until `hover_layout` is ported and alternative 2 is decided, because
+until then the container is a shape with none of its behaviour.
+
+Evidence or removal condition:
+
+Construction is covered in `t/04_Gtk4LayoutRenderer.t`. Revisit when
+`hover_layout` is ported: that is the point at which alternative 2 must be
+accepted or rejected, and at which `WB` either gains real behaviour or is
+formally recorded as a compatibility shim with none.
+
 ## Decision template
 
 Copy this section for new decisions:

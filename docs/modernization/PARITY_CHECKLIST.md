@@ -158,9 +158,30 @@ ellipsize and scrolling behaviour (`gmusicbrowser_layout.pm:3126`, `:3209`),
 so they belong with a real `Layout::Label` port rather than with a size
 request.
 
-`AB` and `WB` have no direct GTK4 equivalent: `AB` becomes alignment properties
-on its child and `WB` becomes a
-plain box, both pending an accepted decision entry.
+`AB` and `WB` have no direct GTK4 equivalent, because `GtkAlignment` and
+`GtkEventBox` were both removed. `AB` becomes alignment properties on its child
+(**D025**) and `WB` becomes a plain box (**D026**). Both entries are
+**Proposed** and both rows stay at `GTK4 in progress` until they are accepted.
+
+`AB` alignment is now covered by real allocations in `t/gtk4/30_Box.t`, which
+D025 requires before that row can move: four equally sized expanding `AB` slots
+of 150px place their child at x=0, 71, and 142 for `xalign` 0, .5, and 1, while
+the default `xscale=1` case fills its slot outright. That is coverage of an
+implementation that already existed, not a proof of new behaviour — the same
+file passes against the preceding commit.
+
+What still blocks `AB` from parity is narrower than "approximation": the
+translation is **exact for every bundled layout**, because the only alignment
+values anywhere in `layouts/` are 0, 0.0, .5, 0.5, and 1 and the only scale
+values are 0 and 0.0. It is inexact only for a hand-written layout using a
+fractional `xalign`/`yalign`, which bucketizes to start/center/end, or a
+fractional `xscale`/`yscale`, which is treated as fill. See D025.
+
+What blocks `WB` is different: no bundled layout uses `WB` at all, and its sole
+purpose in GTK3 was to give a widget its own `GdkWindow` so `hover_layout`
+would work (`gmusicbrowser_layout.pm:1247`). GTK4 removes that need — a child
+can carry its own event controllers — and `hover_layout` is not ported, so `WB`
+is currently a shape with none of its behaviour. See D026.
 
 Parser compatibility items are inheritance, empty overrides, continuation
 lines, translations, ordered packing prefixes, quoted and nested options,

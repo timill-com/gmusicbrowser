@@ -1,10 +1,11 @@
 # Session handoff
 
-Status: `HEAD` is `fc65354` "gtk4: render Filler and apply the legacy size
-request". Three increments landed this session: `Next`/`Prev` with the port's
-first shared-boundary change and a working GTK3 regression smoke, then `Filler`
-with the legacy `ApplyCommonOptions` size request, then the shared test labels
-fixture. Uncommitted on top: that fixture.
+Status: `HEAD` is `527eae9` "gtk4: share one labels fixture across the renderer
+tests". Four increments this session: `Next`/`Prev` with the port's first
+shared-boundary change and a working GTK3 regression smoke; `Filler` with the
+legacy `ApplyCommonOptions` size request; the shared test labels fixture; and
+D025/D026 for `AB`/`WB` with real-Wayland `AB` alignment coverage.
+Uncommitted on top: the last of those.
 
 Last session: 2026-09-07. Branch `gtk4-alpha`.
 
@@ -27,21 +28,22 @@ otherwise from the size of the planning documents.
 
 ## What is committed and what is not
 
-Everything through `Filler` is committed; `HEAD` is `fc65354` and `gtk4-alpha`
-is eight commits past `master`.
+Everything through the labels fixture is committed; `HEAD` is `527eae9` and
+`gtk4-alpha` is nine commits past `master`.
 
-Uncommitted in the tree is the shared labels fixture:
+Uncommitted in the tree is the D025/D026 increment:
 
+	M docs/modernization/DECISIONS.md
+	M docs/modernization/PARITY_CHECKLIST.md
 	M docs/modernization/SESSION_HANDOFF.md
 	M docs/modernization/TESTING.md
-	M t/04_Gtk4LayoutRenderer.t
-	M t/gtk4/20_Paned.t
 	M t/gtk4/30_Box.t
-	M t/gtk4/40_Icons.t
-	?? t/RendererLabels.pm
+	?? t/layouts/align.layout
 
 No GTK3 production code, bundled layout, or file in `pix/` has been touched by
-any of the three increments. `gmusicbrowser.pl` is unmodified.
+any of the four increments. `gmusicbrowser.pl` is unmodified. This last
+increment changes no production code at all: it is two decision entries plus
+test coverage of an existing implementation.
 
 ## Renderer widget state
 
@@ -88,6 +90,59 @@ which reproduces both groups' legacy order including interleaved `-a b -c d`.
 `insert_child_after($widget,undef)` prepends, correct when no start child
 exists yet. `_CreatePaned` implements `PanedPack`, and `_CreateSingle` covers
 `SB`, `FR`, `EB`, `AB`, and `WB`.
+
+## This session, fourth increment: D025/D026 for `AB` and `WB`
+
+The oldest outstanding item in this file, deferred four sessions running,
+is now written. Both entries are **Proposed** and both rows stay at
+`GTK4 in progress` until accepted — nothing was advanced to parity.
+
+The entries are more specific than "these are approximations", because
+measurement narrowed both cases considerably:
+
+**D025, `AB`.** The GTK3 container is
+`Gtk3::Alignment->new(xalign,yalign,xscale,yscale)`
+(`gmusicbrowser_layout.pm:2333`); `GtkAlignment` was removed in GTK4 and its
+documented replacement is the `halign`/`valign` properties every widget now
+carries. The renderer's translation is **exact for every bundled layout**: the
+only alignment values anywhere in `layouts/` are 0, 0.0, .5, 0.5 and 1, and the
+only scale values are 0 and 0.0, all of which map onto GTK4's three-valued enum
+without loss. So the residual gap is not "the shipped layouts are
+approximated" — it is two specific losses reachable only from a hand-written
+layout: a fractional alignment buckets to start/center/end, and a fractional
+scale is treated as fill. That is why the row still cannot advance: exact for
+the layouts we ship is not parity for the layout language.
+
+**D026, `WB`.** The GTK3 container is `Gtk3::EventBox->new`
+(`gmusicbrowser_layout.pm:2337`), also removed in GTK4. Two measurements
+reshaped this entry:
+
+- **No bundled layout uses `WB` at all** — zero declarations across all 13
+  files.
+- `WB` exists for exactly one reason, stated in the source at
+  `gmusicbrowser_layout.pm:1247`: `hover_layout` "only works with widgets/boxes
+  that have their own gdkwindow (put it into a WB box otherwise)". The three
+  `hover_layout` uses in `layouts/` reach it through the `EventBox` and `Cover`
+  *widgets*, not through a `WB` container.
+
+So `WB` is a workaround for a GTK3 limitation that GTK4 removed: a child can
+now carry its own event controllers. The plain box keeps a user layout naming
+`WB` building correctly, but the container currently has none of its behaviour,
+and `hover_layout` is not ported either. D026 alternative 2 — fold
+`hover_layout` into `WB` — is deferred rather than rejected, and is the point
+at which this must be decided.
+
+Both entries reject "make `AB`/`WB` a pass-through contributing no widget",
+because those nodes can be packing targets: `layouts/contrib.layout` has
+`-ABSearch`, `_ABSearchBox2`, and `ABSearchBox2` named in a
+`Window= hidden=...` list. Removing the node would change the tree.
+
+`AB` alignment now has the real-Wayland allocation coverage D025 requires
+before that row could move, in `t/gtk4/30_Box.t`: four equal 150px expanding
+slots place their child at x=0, 71, and 142 for `xalign` 0, .5, 1, and the
+default `xscale=1` case fills its slot. **This is coverage of an implementation
+that already existed, not a proof of new behaviour** — the same file passes
+unchanged against the preceding commit. Do not cite it as an increment proof.
 
 ## This session, third increment: the shared labels fixture
 
@@ -468,14 +523,14 @@ Commands that were actually run and passed this session:
 Running totals: 269 at the start of the session, 298 after `Next`/`Prev`, 315
 after `Filler`, 317 now. The skip count was read from `prove -v`, not assumed.
 
-`make test-gtk4` on the real Wayland connection: **202** TAP results,
-comprising **196 executed assertions passed** and the same six pre-existing M1
+`make test-gtk4` on the real Wayland connection: **216** TAP results,
+comprising **210 executed assertions passed** and the same six pre-existing M1
 feasibility probes skipped, 0 failures. Per file: 18 binding (which is where
-all six skips live), 4 proof-of-life, 84 pane, 52 box, 44 icon. Running totals
+all six skips live), 4 proof-of-life, 84 pane, 66 box, 44 icon. Running totals
 for the same command: 173 at the start of the session, 184 after `Next`/`Prev`,
-202 now. Do not restate this as 202 passing assertions. The six skips were
-counted from `prove -v` output run through a copy of the runner in a scratch
-directory, not assumed.
+202 after `Filler`, 216 after the `AB` coverage. Do not restate this as 216
+passing assertions. The six skips were counted from `prove -v` output run
+through a copy of the runner in a scratch directory, not assumed.
 
 `make test-gtk3`: 1 assertion passed on the real Wayland connection, and the
 same command passed identically against a pristine `git archive` of HEAD with
@@ -647,11 +702,11 @@ means the reported ~1190px window is not the layout's designed size.
 3. Keep running `make test-gtk4` on the real Wayland connection with the system
    packages, outside the execution sandbox when needed. Count explicit skips.
    Also run `make test-gtk3` after any shared-code change; it works now.
-4. Write the `DECISIONS.md` entries for `AB` and `WB`. These are the oldest
-   outstanding item and they block those two rows from ever reaching parity.
-   **Still not done, now four sessions running.** `AB` remains alignment
-   properties on its child and `WB` a plain box; both are approximations and
-   must not be advanced to parity until their entries are accepted.
+4. `DECISIONS.md` entries for `AB` and `WB`. **Written this session** as D025
+   and D026, both **Proposed**. Accept them, or push back. Accepting D025 does
+   not by itself advance the `AB` row: the fractional alignment/scale gap it
+   documents has to be closed or explicitly waived first. Accepting D026 needs
+   a call on its alternative 2, folding `hover_layout` into `WB`.
 5. D006 binding evidence. **Already recorded, keep extending it.** D006 now
    holds the graphene marshalling failure, the `->can` segfault, the
    widget-before-`Gtk4::init` segfault, the empty-string boolean artifact, the
