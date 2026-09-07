@@ -88,13 +88,17 @@ my %ButtonDefaults= (relief=>'none', size=>'large-toolbar');
 # for every widget by _ApplyCommonOptions, so they are not reported here.
 my %ButtonHandled= map {$_=>1} qw/icon stock text tip size relief minwidth minheight/;
 
-# The same for a Layout::Label widget. 'markup' is deliberately absent: it goes
-# through ::UsedFields and per-song substitution, so it belongs with a real
-# Layout::Label port rather than with these presentation options. So are
-# 'minsize'/'expand_max', which drive the legacy scrolling-label machinery.
-# 'font'/'color' are handled through CSS, which is where GTK4 moved the widget
-# overrides Layout::Label used; see D031.
-my %LabelHandled= map {$_=>1} qw/text xalign yalign ellipsize minwidth minheight font color/;
+# The same for a Layout::Label widget. 'minsize'/'expand_max' are deliberately
+# absent: they drive the legacy scrolling-label machinery. 'font'/'color' are
+# handled through CSS, which is where GTK4 moved the widget overrides
+# Layout::Label used; see D031.
+#
+# 'markup' is handled only where it names no song field. Legacy Layout::Label
+# already splits on exactly that (gmusicbrowser_layout.pm:3156): a value
+# ::UsedFields finds fields in subscribes through WatchSelID and re-renders per
+# song, and anything else is set once. The static half needs no state, so it is
+# ported and the field-bearing half stays reported. See D033.
+my %LabelHandled= map {$_=>1} qw/text markup xalign yalign ellipsize minwidth minheight font color/;
 
 # The legacy Layout::Label defaults (gmusicbrowser_layout.pm:3105). GTK4's own
 # Label default is .5/.5, so these are not redundant.
@@ -632,6 +636,16 @@ sub _ApplyLabelOptions
 	}
 	my $ellipsize=_Ellipsize($values->{ellipsize});
 	$widget->set_ellipsize($ellipsize) if defined $ellipsize;
+	# markup= over text=, which is the legacy order at
+	# gmusicbrowser_layout.pm:3156. A field-bearing value needs the song state
+	# path and is left reported; a malformed one falls back to plain text so a
+	# typo shows its own source rather than an empty widget.
+	my $markup=$values->{markup};
+	my $marked;
+	if (defined $markup && !_MarkupUsesFields($markup))
+	{	$marked=_Markup($widget,$markup);
+		$widget->set_text($markup) unless defined $marked;
+	}
 	# font=/color= become style classes; a value that cannot be translated, or
 	# a display with no provider at all, leaves the option reported instead.
 	# A widget with neither inherits the layout's DefaultFont/DefaultFontColor,
@@ -656,6 +670,7 @@ sub _ApplyLabelOptions
 	}
 	my @ignored=grep { !$LabelHandled{$_}
 		|| ($_ eq 'ellipsize' && !defined _Ellipsize($values->{$_}))
+		|| ($_ eq 'markup' && !defined $marked)
 		|| ($_=~m/^(?:font|color)$/ && !$styled{$_})
 		|| ($_=~m/^[xy]align$/ && $values->{$_}!~m/^[0-9]*\.?[0-9]+$/) }
 		@{$node->{options}{order}};
@@ -762,6 +777,47 @@ sub _IsGrey
 	{	return $r eq $g && $g eq $b;
 	}
 	return 0;
+}
+
+# Whether a legacy markup= refers to song fields, which is what legacy
+# Layout::Label branches on at gmusicbrowser_layout.pm:3156. ::UsedFields
+# (gmusicbrowser.pl:1012) looks for %<letter>, $name, and ${expr}, mapping the
+# letters through %::ReplaceFields and keeping only the ones it defines.
+#
+# That table is built from the song field definitions in
+# gmusicbrowser_songs.pm:1935, which is shared core the renderer must not pull
+# in, so any field sigil counts here rather than only a defined one. The
+# difference is deliberately on the safe side: an unmapped '%X' is reported
+# instead of being drawn as literal text. It changes nothing for the bundled
+# layouts, whose markup= values name only real fields (%a %g %l %m %s %t %y %Y
+# and the $album/$artist/$length/$title_or_file/$track aliases).
+sub _MarkupUsesFields
+{	my $value=shift;
+	return 1 if $value=~m/%[a-zA-Z]/;
+	return 1 if $value=~m/\$[a-zA-Z{]/;
+	return 0;
+}
+
+# A markup value the label can actually render, or nothing.
+#
+# GTK4's set_markup neither dies nor raises a trappable Perl warning on a
+# malformed value: it prints a GTK warning, leaves the displayed text as it
+# was, and keeps the raw string in get_label. So the only way to tell is to
+# try it over a sentinel the markup itself cannot produce and see whether the
+# text moved. Checking for empty text instead would misjudge the valid
+# '<b></b>' and '' cases, which legitimately render nothing.
+#
+# The GTK warning still reaches stderr once per refused value; it cannot be
+# suppressed from Perl. That is the cost of GTK4 offering no validator - Pango
+# is unreachable through this binding, so Pango::parse_markup is not available.
+my $MARKUP_SENTINEL= "\x{1}gmb-markup\x{1}";
+
+sub _Markup
+{	my ($widget,$value)=@_;
+	return undef unless defined $value;
+	$widget->set_text($MARKUP_SENTINEL);
+	$widget->set_markup($value);
+	return $widget->get_text ne $MARKUP_SENTINEL ? $value : undef;
 }
 
 # The Pango mode a legacy ellipsize= asks for, or undef if it names none. '1' is

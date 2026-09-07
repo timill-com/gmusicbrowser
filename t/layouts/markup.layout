@@ -1,0 +1,4 @@
+[gtk4 markup]
+Type=G
+VBroot= Text(markup="<b>bold</b>") Text2(markup="/") Text3(text="plain") VBmore
+VBmore= Text4(markup="<b>unclosed") Text5(markup="<b>%t</b>") Text6(markup="a &badentity; b") Label(markup="<span size='xx-large'>big</span>",text="ignored") Label2(markup="$album")

@@ -169,13 +169,60 @@ use lib '.';
 	our @ISA=('Gtk4::Widget::Double');
 	# real GTK4 centres a label by default and does not ellipsize, which is what
 	# makes the legacy xalign=>0 default observable
-	sub new { bless {label=>$_[1],xalign=>0.5,yalign=>0.5,ellipsize=>'none'},$_[0] }
+	# a real Gtk4::Label->new('') reports '' from get_text, not undef, and
+	# carries no markup until set_markup is called
+	sub new { bless {label=>$_[1],text=>$_[1],use_markup=>'',
+		xalign=>0.5,yalign=>0.5,ellipsize=>'none'},$_[0] }
 	sub set_xalign { $_[0]{xalign}=$_[1] }
 	sub get_xalign { $_[0]{xalign} }
 	sub set_yalign { $_[0]{yalign}=$_[1] }
 	sub get_yalign { $_[0]{yalign} }
 	sub set_ellipsize { $_[0]{ellipsize}=$_[1] }
 	sub get_ellipsize { $_[0]{ellipsize} }
+	sub set_text { $_[0]{label}=$_[1]; $_[0]{text}=$_[1]; $_[0]{use_markup}='' }
+	sub get_label { $_[0]{label} }
+	sub get_use_markup { $_[0]{use_markup} }
+	# Real GTK4 set_markup keeps the raw string in get_label but, on a
+	# malformed value, prints a GTK warning and leaves the DISPLAYED text
+	# untouched - it does not die and raises no trappable Perl warning. The
+	# double reproduces that, including the retained previous text, because
+	# that is the only thing the renderer can detect the failure by. The
+	# stripping here is deliberately crude; it only has to distinguish a value
+	# Pango accepts from one it refuses.
+	sub set_markup
+	{	my ($self,$m)=@_;
+		$self->{label}=$m;
+		$self->{use_markup}=1;
+		my $stripped=_strip($m);
+		return unless defined $stripped;	# refused: displayed text stays put
+		$self->{text}=$stripped;
+	}
+	sub get_text { $_[0]{text} }
+	# undef for markup Pango would refuse: an unclosed or unknown tag, or an
+	# unknown entity. Everything else strips to its text content.
+	sub _strip
+	{	my $m=shift;
+		my @open;
+		my $text='';
+		my $rest=$m;
+		while (length $rest)
+		{	if ($rest=~s/^<(\/?)([a-zA-Z_][\w-]*)([^>]*)>//)
+			{	my ($close,$tag,$attrs)=($1,$2,$3);
+				return undef unless $tag=~m/^(?:b|i|u|s|big|small|tt|sub|sup|span|markup)$/;
+				if ($close) { return undef unless @open && $open[-1] eq $tag; pop @open; }
+				elsif ($attrs!~m/\/$/) { push @open,$tag }
+			}
+			elsif ($rest=~s/^&(\w+|#\d+);//)
+			{	my $e=$1;
+				return undef unless $e=~m/^(?:amp|lt|gt|quot|apos|#\d+)$/;
+				$text.='&';
+			}
+			elsif ($rest=~s/^([^<&]+)//) { $text.=$1 }
+			elsif ($rest=~s/^(.)//) { $text.=$1 }
+		}
+		return undef if @open;
+		return $text;
+	}
 }
 {	package Gtk4::Image;
 	our @ISA=('Gtk4::Widget::Double');
@@ -699,6 +746,80 @@ $zrenderer->Destroy;
 	$renderer->Destroy;
 	is($renderer->{style_provider},undef,'Destroy releases the style provider');
 	is($renderer->{style_rules},undef,'Destroy drops the collected style rules');
+}
+
+# Static markup=. Legacy Layout::Label branches at
+# gmusicbrowser_layout.pm:3156: a value ::UsedFields finds song fields in
+# subscribes through WatchSelID and re-renders per song, and anything else is
+# set once with set_markup. Only the second half is ported (D033), so a
+# field-bearing value stays reported.
+{	my $mfixture=File::Spec->catfile('t','layouts','markup.layout');
+	my $mcatalog=Layout::Parser::ParseFiles(files=>[$mfixture]);
+	is(scalar @{$mcatalog->{diagnostics}},0,'markup fixture parses without diagnostics');
+	my $renderer=Layout::Renderer::Gtk4->new
+	(	catalog=>$mcatalog,
+		frontend=>$frontend,
+		labels=>GMB::Test::RendererLabels::labels(),
+	);
+	$renderer->Render('gtk4 markup');
+
+	# a field-free markup is applied, and get_label keeps the raw string while
+	# get_text is what the label actually shows
+	is($renderer->Widget('Text')->get_label,'<b>bold</b>','a static markup reaches the label');
+	is($renderer->Widget('Text')->get_text,'bold','the markup is parsed rather than shown literally');
+	ok($renderer->Widget('Text')->get_use_markup,'a static markup turns markup parsing on');
+	is($renderer->Unhandled('Text'),undef,'an applied static markup is not reported');
+	# a markup with no tags at all is still a markup, not a text
+	is($renderer->Widget('Text2')->get_text,'/','a tagless static markup is applied verbatim');
+	is($renderer->Unhandled('Text2'),undef,'a tagless static markup is not reported');
+	# control: a label with text= and no markup= is untouched by any of this
+	is($renderer->Widget('Text3')->get_label,'plain','a text= label keeps its text');
+	ok(!$renderer->Widget('Text3')->get_use_markup,'a text= label does not turn markup parsing on');
+	is($renderer->Unhandled('Text3'),undef,'a text= label reports nothing');
+
+	# markup= wins over text=, which is the legacy order at :3156
+	is($renderer->Widget('Label')->get_text,'big','markup= takes precedence over text=');
+	is($renderer->Unhandled('Label'),undef,'a winning markup= is not reported');
+
+	# A malformed value cannot be applied. GTK4 neither dies nor warns in a way
+	# Perl can trap, so the renderer detects it and falls back to plain text -
+	# the label shows its own source rather than vanishing - and reports it.
+	is($renderer->Widget('Text4')->get_text,'<b>unclosed',
+		'an unclosed tag falls back to showing the raw markup as text');
+	ok(!$renderer->Widget('Text4')->get_use_markup,
+		'a refused markup leaves markup parsing off');
+	is_deeply($renderer->Unhandled('Text4'),['markup'],'an unclosed tag is reported');
+	is($renderer->Widget('Text6')->get_text,'a &badentity; b',
+		'an unknown entity falls back to the raw markup as text');
+	is_deeply($renderer->Unhandled('Text6'),['markup'],'an unknown entity is reported');
+
+	# A field-bearing value needs the song state path, which is not ported, so
+	# it is left alone entirely and reported.
+	is($renderer->Widget('Text5')->get_text,'','a %field markup is not applied');
+	ok(!$renderer->Widget('Text5')->get_use_markup,
+		'a %field markup does not turn markup parsing on');
+	is_deeply($renderer->Unhandled('Text5'),['markup'],'a %field markup is reported');
+	is($renderer->Widget('Label2')->get_text,'','a $field markup is not applied');
+	is_deeply($renderer->Unhandled('Label2'),['markup'],'a $field markup is reported');
+	# The validation writes a sentinel into the label before trying the markup,
+	# so no label may still be showing it afterwards - on the applied path, the
+	# refused path, or the field-bearing path that never validates at all.
+	unlike($renderer->Widget($_)->get_text,qr/gmb-markup/,
+		"$_ does not leak the validation sentinel")
+		for qw/Text Text2 Text3 Text4 Text5 Text6 Label Label2/;
+	$renderer->Destroy;
+}
+
+# The field detection itself. It deliberately counts any field sigil rather
+# than only one %::ReplaceFields defines, because that table is built from the
+# shared song field definitions the renderer must not load.
+{	my @fields=('%t','<b>%a</b>','$album','${expr}',' %y','a %X b');
+	my @static=('/','<b>bold</b>','','100%','plain text','50% off',
+		'<span size="xx-large">X</span>');
+	ok(Layout::Renderer::Gtk4::_MarkupUsesFields($_),"'$_' is field-bearing")
+		for @fields;
+	ok(!Layout::Renderer::Gtk4::_MarkupUsesFields($_),"'$_' is static")
+		for @static;
 }
 
 # Layout-level inheritance of DefaultFont/DefaultFontColor. Legacy InitLayout

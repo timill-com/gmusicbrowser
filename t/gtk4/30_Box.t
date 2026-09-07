@@ -487,6 +487,66 @@ _drain();
 	_drain();
 }
 
+# Static markup= as real rendering. Legacy Layout::Label branches at
+# gmusicbrowser_layout.pm:3156 on whether ::UsedFields finds song fields; only
+# the field-free half is ported (D033). A markup that names a size is
+# physically measurable, which is what makes this behaviour rather than
+# construction coverage.
+{	my $mfixture=File::Spec->catfile('t','layouts','markup.layout');
+	my $mcatalog=Layout::Parser::ParseFiles(files=>[$mfixture]);
+	is(scalar @{$mcatalog->{diagnostics}},0,'markup fixture parses without diagnostics');
+	my $mrenderer=Layout::Renderer::Gtk4->new
+	(	catalog=>$mcatalog,
+		frontend=>$frontend,
+		labels=>GMB::Test::RendererLabels::labels(),
+	);
+	my $mroot=$mrenderer->Render('gtk4 markup');
+	$mroot->set_direction('ltr');
+	my $mwindow=Gtk4::Window->new;
+	$mwindow->set_default_size(700,400);
+	$mwindow->set_child($mroot);
+	$mwindow->present;
+	ok(_wait_for_window($mwindow),'GTK4 window mapped before markup assertions');
+	_drain();
+
+	# get_text is the rendered text and get_label the raw string, so the pair
+	# distinguishes a parsed markup from one shown literally
+	is($mrenderer->Widget('Text')->get_text,'bold',
+		'a static markup is parsed rather than drawn as its own source');
+	is($mrenderer->Widget('Text')->get_label,'<b>bold</b>',
+		'the raw markup is retained in get_label');
+	is($mrenderer->Widget('Text2')->get_text,'/','a tagless static markup is applied verbatim');
+
+	# the physical effect: a span naming a size measures taller than plain text.
+	# Both labels carry the same one-character content so only the markup can
+	# change the measurement.
+	my $bigh=($mrenderer->Widget('Label')->measure('vertical',-1))[0];
+	my $plainh=($mrenderer->Widget('Text2')->measure('vertical',-1))[0];
+	cmp_ok($bigh,'>',$plainh,'a markup naming xx-large renders taller than plain text');
+	is($mrenderer->Widget('Label')->get_text,'big','markup= takes precedence over text=');
+
+	# a malformed value falls back to plain text, so the widget still shows
+	# something and the option is reported. GTK prints its own warning during
+	# the validation attempt; it cannot be suppressed from Perl.
+	is($mrenderer->Widget('Text4')->get_text,'<b>unclosed',
+		'an unclosed tag falls back to showing the raw markup as text');
+	ok(!$mrenderer->Widget('Text4')->get_use_markup,
+		'a refused markup leaves markup parsing off');
+	is_deeply($mrenderer->Unhandled('Text4'),['markup'],'an unclosed tag is reported');
+
+	# a field-bearing markup is left entirely alone, since the song state path
+	# is not ported
+	is($mrenderer->Widget('Text5')->get_text,'','a %field markup is not applied');
+	is_deeply($mrenderer->Unhandled('Text5'),['markup'],'a %field markup is reported');
+	# control: a plain text= label is untouched by any of this
+	is($mrenderer->Widget('Text3')->get_text,'plain','a text= label keeps its text');
+	is($mrenderer->Unhandled('Text3'),undef,'a text= label reports nothing');
+
+	$mrenderer->Destroy;
+	$mwindow->destroy;
+	_drain();
+}
+
 # Layout-level inheritance of DefaultFont/DefaultFontColor as real rendering.
 # Legacy InitLayout reads them into {global_options} (gmusicbrowser_layout.pm:971)
 # and NewWidget merges them into every widget (:1162), but both fall back with
