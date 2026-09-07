@@ -59,7 +59,7 @@ surface. Numeric suffixes retain the base element's behaviour.
 | `HB`, `VB` | Horizontal/vertical packing | GTK4 in progress |
 | `HP`, `VP` | Horizontal/vertical pane | GTK4 in progress |
 | `TB`, `NB` | Legacy/current tabbed container | Not started |
-| `MB`, `SM`, `BM` | Menu bar, submenu, button menu | Not started |
+| `MB`, `SM`, `BM` | Menu bar, submenu, button menu | Not started; the menu interpreter exists, see D038 (accepted) |
 | `EB` | Expander | GTK4 in progress |
 | `FB` | Fixed-position container | Not started; prefix parses, see D035 (accepted) |
 | `FR` | Frame | GTK4 in progress |

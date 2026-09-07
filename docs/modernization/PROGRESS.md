@@ -94,7 +94,7 @@ and the order below is set by what blocks what, not by size.
 
 | group | instances | blocked on |
 |---|---:|---|
-| menus (`MenuItem` 99, `SeparatorMenuItem` 30, the `*Item` families) | 206 | **decided** — D038, port the interpreter; needs `SongList` for 23 of 50 call sites |
+| menus (`MenuItem` 99, `SeparatorMenuItem` 30, the `*Item` families) | 206 | interpreter **built** (D038); needs `MB`/`SM`/`BM` to place one in a layout |
 | list/model (`FilterPane` 63, `SimpleSearch` 30, `SongList` 22, `SongTree` 19, `QueueList` 17, …) | 173 | the 100k-row `GListModel` probe, and D010 |
 | song-field labels (`Title` 27, `Album` 26, `Artist` 25, `Total` 26, `Time` 13, …) | 157 | a `FRONTEND_CONTRACT.md` extension, and a fixture song source |
 | everything else (`ToggleButton` 35, `Cover` 26, `Sort` 21, `TimeBar` 20, …) | 390 | mostly pointer input and the show/hide subsystem |
@@ -180,12 +180,12 @@ The next unimplemented elements by instance count, for scale:
 
 | suite | result | notes |
 |---|---|---|
-| `make test-modernization` | 484 assertions, 0 skips | offline, in-process doubles |
-| `make test-gtk4` | 373 TAP = 368 executed + 5 skips | real Wayland; 4 M1 probes still BLOCKED |
+| `make test-modernization` | 548 assertions, 0 skips | offline, in-process doubles |
+| `make test-gtk4` | 398 TAP = 393 executed + 5 skips | real Wayland; 4 M1 probes still BLOCKED |
 | `make test-gtk3` | 1 assertion | startup/shutdown on real Wayland |
 
 Per file for `make test-gtk4`: 18 binding (holding all 5 skips), 4
-proof-of-life, 84 pane, 166 box, 74 icon, 27 input. Count skips from `prove -v`, never
+proof-of-life, 84 pane, 166 box, 74 icon, 27 input, 25 menu. Count skips from `prove -v`, never
 by subtraction. Two GTK `Failed to set text ... from markup` warnings are
 expected, one per refused value in `t/layouts/markup.layout`.
 

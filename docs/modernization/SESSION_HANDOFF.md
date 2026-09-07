@@ -1,9 +1,10 @@
 # Session handoff
 
-Status: the tree is clean. The most recent session did **two** increments after
-re-verifying the whole baseline: a parser correctness fix (**D035**) and the
+Status: the tree is clean. The most recent session did **three** increments
+after re-verifying the whole baseline: a parser correctness fix (**D035**), the
 **M1 input-controller probe**, which closed a gate row that had been blocking
-every other group of work.
+every other group of work, and the **menu interpreter** (**D038**). It also
+recorded the user's standing direction as D036 and D037.
 
 ## Most recent session: the `FB` packing prefix (D035)
 
@@ -71,6 +72,46 @@ because the contract can say *which* song is current (`CurSong` emits
 `{id=>...}`) but has no way to resolve an ID to field values. It also needs a
 fixture song source, since `gmusicbrowser_gtk4.pl` has no library at all. Scope
 it with the user before writing code.
+
+## Most recent increment: the menu interpreter (D038)
+
+`gmusicbrowser_gtk4_menu.pm`, plus `t/07_Gtk4Menu.t` (64 offline) and
+`t/gtk4/60_Menu.t` (25 on Wayland). All 12 conditional filters and all four
+structural operators are carried, and the model is rebuilt per popup.
+
+**Three findings, each of which cost a wrong first attempt:**
+
+- **`append_section` does not group what follows it.** Appending an empty
+  section where the separator sits leaves later entries at the top level and
+  counts the empty section as an item — `get_n_items` read 6 where 2 was
+  expected. The definition is now split into runs first, each run becomes a
+  section, and a single run stays flat. **The offline double had faithfully
+  reproduced the wrong model, so only the real Gio exposed this** — which is the
+  case for keeping a Wayland test beside every offline one.
+- **An entry carrying `code` takes the choice-menu path whatever its submenu's
+  type** (legacy's order at `gmusicbrowser.pl:4742`), because an `ordered_hash`
+  submenu is an array of alternating labels and values, not a definition.
+  Dispatching on the submenu's type — the natural-looking reading — dies with
+  `Can't use string ("Main") as a HASH ref`. **Found only by building the real
+  `@TrayMenu` shape.** Every hand-written fixture had the convenient shape and
+  passed. *Test a ported interpreter against a definition it did not author.*
+- **`include` receives the menu as its second argument and both bundled
+  callbacks use it** (`gmusicbrowser_layout.pm:25`, `:40`) to append in place via
+  `BuildChoiceMenu(menu=>$menu)`, returning nothing. Dropping that argument
+  looked harmless and silently broke both.
+
+**On evidence, stated plainly: a new module cannot fail meaningfully against a
+pristine tree.** The pristine run dies at `require` with **0 assertions
+executed**. Do not report that as discrimination. What validates this instead is
+that **29 assertions compare against the legacy conditions transcribed verbatim
+and executing in the same process**, with two guards requiring that some cases
+skip and some are kept.
+
+**Not done, and excluded from any coverage claim:** no layout `MenuItem`
+instance renders yet. This is the mechanism; placing a menu in a layout needs
+the `MB`/`SM`/`BM` containers. The 23 `gmusicbrowser_list.pm` call sites still
+await `SongList`. `submenu3`/`code3` are reported through `Unhandled` because a
+right-click alternative needs a button number a model item does not carry.
 
 ## Standing direction set by the user: D036, D037, D038
 

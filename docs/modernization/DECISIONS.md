@@ -2238,7 +2238,7 @@ standard answer under D036 clause 1.
 
 ## D038 — Port the menu *interpreter* to `GMenu`/`PopoverMenu`, not the menu instances
 
-Status: **Accepted** (direction and scope), implementation not started
+Status: **Accepted**, interpreter implemented
 
 Gate: the 23 `gmusicbrowser_list.pm` call sites cannot be exercised until
 `SongList`/`SongTree` exists
@@ -2307,12 +2307,59 @@ Alternatives:
    after the risk was found; the user kept the subsystem scope with the
    interpreter framing instead.
 
+Implementation notes, all measured:
+
+- **A separator is a section boundary, not an item.** Appending an empty section
+  where the separator sits does **not** group anything: measured, the empty
+  section counts as an item of its own and the entries after it stay at the top
+  level (`get_n_items` read 6 where 2 was expected). `_Append` therefore splits
+  the definition into runs first and makes each run a section, leaving a single
+  run flat so the common menu keeps no needless wrapper.
+- **An entry carrying `code` takes the choice-menu path whatever its submenu's
+  type.** That is legacy's order at `gmusicbrowser.pl:4742`, and the reason is
+  that an `ordered_hash` submenu is an array of alternating labels and values
+  rather than a definition. Dispatching on the submenu's type instead — which is
+  the natural-looking reading — dies with `Can't use string ("Main") as a HASH
+  ref`. **Found only by building the real `@TrayMenu` shape**; every synthetic
+  fixture had missed it.
+- **`include` receives the menu as its second argument and both bundled
+  callbacks use it** (`gmusicbrowser_layout.pm:25` and `:40`), calling
+  `BuildChoiceMenu(menu=>$menu)` to append in place and returning nothing to
+  splice. Since splitting happens before any model exists, such a callback is
+  collected during the split and run during the fill.
+- **Sensitivity is an action property in GTK4**, not an item property, so an
+  insensitive entry is disabled rather than dropped, matching legacy.
+- Code reaches an item through `Gio::SimpleAction`, because a model item cannot
+  hold a closure. A **string** code is a command name and goes through the
+  frontend contract, never to a widget.
+
 Evidence or removal condition:
 
-Not yet implemented. `Gtk4::PopoverMenu` and `Gtk4::Popover` are both confirmed
-to construct (D006, input-controller probe). Revisit if the dynamic operators
-turn out to be unrepresentable against a rebuilt-per-popup `GMenu`, which would
-reopen the choice between a model and a hand-built popover.
+`t/07_Gtk4Menu.t` (64 assertions, offline) and `t/gtk4/60_Menu.t` (25
+assertions, real Wayland).
+
+**The strongest evidence is not a pristine comparison.** A new module cannot
+fail meaningfully against a tree that lacks it — the pristine run dies at
+`require` with **0 assertions executed**, which proves only that the file is
+new. What validates the port instead is that **29 of the offline assertions
+compare the interpreter's answer against the legacy conditions transcribed
+verbatim from `gmusicbrowser.pl:4675-4687` and executing in the same process**,
+so the expected values are produced by legacy code rather than written by hand.
+Two guard assertions confirm the comparison discriminates, by requiring that
+some cases are skipped and some kept.
+
+The Wayland file additionally checks the real model: section counts and their
+contents, one action per code-bearing entry, exactly one disabled action,
+firing through `activate_action`, a string code arriving at the frontend, a
+stateful action starting from its own `check` callback, a real `PopoverMenu`
+built from the model, and that a rebuild replaces the previous actions rather
+than accumulating them.
+
+Still true, and excluded from any coverage claim: the **23**
+`gmusicbrowser_list.pm` call sites cannot be exercised until `SongList` exists,
+and no layout `MenuItem` instance is rendered yet — this entry ports the
+mechanism, not the `MB`/`SM`/`BM` containers that would place a menu in a
+layout.
 
 ## Decision template
 

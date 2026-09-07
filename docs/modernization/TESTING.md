@@ -10,14 +10,14 @@ make test-modernization
 
 This runs the neutral layout parser, frontend contract and lifecycle, legacy
 adapter and lifecycle integration, and GTK4 renderer contract tests. On
-2026-09-07 it reported 484 executed assertions passed and no skips. Running
+2026-09-07 it reported 548 executed assertions passed and no skips. Running
 totals: 269 two sessions ago, 298 after `Next`/`Prev`, 315
 after `Filler`, 317 after the shared labels fixture, 325 after the
 `size=`/`relief=` increment, 342 after label alignment/ellipsize, 344 after the
 `ellipsize=1` normalisation, 364 after the `AB` constraint layout, 395 after
 the label `font=`/`color=` CSS, 415 after the `DefaultFont`/`DefaultFontColor`
 inheritance, 458 after the static `markup=`, 473 after the size groups, 484
-after the `FB` packing prefix. The
+after the `FB` packing prefix, 548 after the menu interpreter. The
 skip count was read from `prove -v`, not assumed. The
 renderer test uses small in-process GTK doubles; it proves the
 parser/renderer/command wiring without claiming that a real GTK4 binding or
@@ -54,7 +54,8 @@ six feasibility probes were explicitly skipped. This replaces the temporary
 archive setup recorded on 2026-09-06, whose reported total also included those
 six skips. As of the input-controller probe the suite reports **373 TAP = 368
 executed + 5 skips** (18 binding, 4 proof-of-life, 84 pane, 166 box, 74 icon,
-27 input), counted from `prove -v`. A pinned, reproducible package and the four
+27 input, 25 menu; 398 TAP after the menu interpreter), counted from
+`prove -v`. A pinned, reproducible package and the four
 remaining M1 probes are still required.
 
 The run emits `Too late to run INIT block` from the introspection module and
@@ -90,9 +91,10 @@ totals for the same command: 173 results before `Next`/`Prev`, 184 after it,
 `size=`/`relief=`, 258 after label alignment, 261 after the `ellipsize=1`
 normalisation, 287 after the `AB` constraint layout, 304 after the label
 `font=`/`color=` CSS, 323 after the inheritance, 337 after the static
-`markup=`, 346 after the size groups, 373 after the input probe. Per file: 18
+`markup=`, 346 after the size groups, 373 after the input probe, 398 after the
+menu interpreter. Per file: 18
 binding, which is where all five remaining skips live, 4 proof-of-life, 84
-pane, 166 box, 74 icon, 27 input. The
+pane, 166 box, 74 icon, 27 input, 25 menu. The
 per-file figures were measured by running each file alone, not by subtraction.
 
 **Two GTK `Failed to set text ... from markup` warnings are expected** in this
@@ -382,6 +384,35 @@ because D022 makes stock GNOME a required target.
 With `icon_path` omitted or pointing at a missing directory, rendering still
 succeeds: standard names resolve, bundled names return nothing and the widget
 keeps its text label.
+
+## The menu interpreter
+
+`t/07_Gtk4Menu.t` (64 offline) and `t/gtk4/60_Menu.t` (25 on real Wayland),
+for D038.
+
+**A new module cannot fail meaningfully against a pristine tree.** The pristine
+run dies at `require` with **0 assertions executed**, which proves the file is
+new and nothing else. Do not report that as a discriminating comparison. What
+validates this port instead:
+
+- **29 assertions compare against legacy code running in the same process.**
+  The conditions from `gmusicbrowser.pl:4675-4687` are transcribed verbatim into
+  the test and both implementations are fed the same table, so the expected
+  values are produced by legacy rather than written by hand. Two guard
+  assertions require that some cases are skipped and some kept, so a filter that
+  always answered one way could not satisfy the comparison.
+- **A real definition's shape caught a bug the synthetic fixtures missed.**
+  Building something shaped like the real `@TrayMenu` died with `Can't use
+  string ("Main") as a HASH ref`, because legacy sends an entry carrying `code`
+  to `BuildChoiceMenu` whatever its submenu's type, and an `ordered_hash`
+  submenu is an array of alternating labels and values rather than a definition.
+  Every hand-written fixture had the natural-looking shape and passed. **Test a
+  ported interpreter against a definition it did not author.**
+- **An assumption about `append_section` was wrong and the display caught it.**
+  Appending an empty section at the separator does not group anything: measured,
+  `get_n_items` read 6 where 2 was expected, because the empty section counts as
+  an item and later entries stay at the top level. The offline double had
+  faithfully reproduced the *wrong* model, so only the real Gio exposed it.
 
 ## The M1 input-controller probe
 
