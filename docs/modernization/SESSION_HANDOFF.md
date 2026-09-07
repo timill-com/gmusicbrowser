@@ -1,11 +1,121 @@
 # Session handoff
 
-Status: the tree is clean. This session did one increment: the layout-wide
-`DefaultFont`/`DefaultFontColor` globals are now inherited by every label,
-recorded as **D032**. That closes D031's deferred alternative 5, which the
-previous handoff named as the most likely next step.
+Status: the tree is clean. This session did two increments, both on
+`Layout::Label`:
 
-## This session's increment: layout-level option inheritance
+- the layout-wide `DefaultFont`/`DefaultFontColor` globals are now inherited
+  by every label (**D032**), closing D031's deferred alternative 5;
+- a **static** `markup=` is now applied (**D033**), which also corrects the
+  recorded `markup=` usage count from 76 to 56 real layout options.
+
+Read D033 before scoping any further option count. The 76 was arithmetically
+right for its grep and still wrong as a figure for a renderer increment,
+because it mixed layout options with SongTree drawing-layer uses in skin
+blocks and a commented-out line.
+
+## This session's second increment: a static `markup=`
+
+`markup=` looked like the largest remaining prize and the one thing needing the
+song-field state path. Reading `Layout::Label` first showed it is **two
+options**, split in the legacy code itself at
+`gmusicbrowser_layout.pm:3156`: a value `::UsedFields` finds fields in
+subscribes through `WatchSelID` and re-renders per song; anything else is set
+once with `set_markup`. The second half needs no state, so it is a
+self-contained increment. Recorded as **D033**.
+
+**The count correction matters more than the code.** The docs recorded 76 uses.
+That is right for `[(,] *markup=` across `layouts/` and still the wrong figure
+for a renderer increment, because it reconciles as:
+
+| | count |
+|---|---:|
+| real `markup=` options in layout blocks | **56** |
+| SongTree drawing-layer uses in `{Group ...}`/`{Column ...}` skin blocks | 19 |
+| commented-out layout-block line | 1 |
+| total matching the recorded grep | 76 |
+
+The 19 are the `text(markup=...)` drawing DSL, with `pesc()`, `.`
+concatenation, `$_row` and `myfont`. No label port will ever reach them — the
+same class as the already-recorded `shimmer.layout:132` `color='#ccc'` trap.
+The 56 was confirmed by walking the parser's own catalog, not by grep.
+
+**Of the 56, exactly 2 are static, and both land on implemented widgets:**
+`Text(markup="/")` at `makeitlooklike.layout:481` and `Label0` with an
+`xx-large` span at `shimmer.layout:119`. The other 54 name fields and stay
+reported.
+
+### Malformed markup, which is where the real work was
+
+GTK4 gives no usable signal, measured through this binding:
+
+- `set_markup` does **not** die on a malformed value.
+- Its warning is a **GTK** warning on stderr, not a Perl one —
+  `$SIG{__WARN__}` captures nothing, so it cannot be trapped.
+- On failure it leaves the **displayed text untouched** while `get_label` still
+  returns the raw string. So the widget silently keeps whatever it had.
+- `Pango::parse_markup` is undefined, consistent with the recorded "Pango is
+  unreachable through the GTK4 binding", so there is no validator to ask.
+
+The renderer therefore sets the markup over a sentinel the markup itself cannot
+produce and checks whether the text moved. A refused value falls back to
+`set_text` of the raw string, so a typo shows its own source rather than
+producing an invisible widget, and the option is reported.
+
+**A refused value still prints one GTK warning to stderr.** Two appear during
+`make test-gtk4`, one per refused fixture value. They are expected; do not hide
+them.
+
+### The wrong reading I nearly implemented
+
+The first probe concluded "on failure `get_text` returns empty, so empty means
+refused." **That was an artifact of the probe's own fixture** — the labels were
+built with `Gtk4::Label->new('')`, so the *retained previous text* was empty.
+Re-probing over a non-empty label showed the failure leaves the previous text
+intact (`SENTINEL`, then `previous`).
+
+Had it been implemented, a valid `<b></b>` — which legitimately renders nothing
+— would have been reported as refused. **Probe a retained-state behaviour from
+a non-default starting state**, or the default masks what is actually retained.
+
+The full validation table, from the real binding: `<b>closed</b>`, `plain`,
+`/`, `` (empty), `<b></b>`, `<span size="xx-large" ...>X</span>`, `&amp;` and
+`<i>a</i> &amp; <b>b</b>` all valid; `<b>unclosed`, `a &badentity; b` and
+`<unknowntag>x</unknowntag>` all refused. The offline double's markup stripper
+was validated against **all 11**, rather than written to satisfy the test.
+
+### Field detection without the shared table
+
+`::UsedFields` (`gmusicbrowser.pl:1012`) maps `%<letter>` through
+`%::ReplaceFields` and keeps only defined letters. That table is built at
+`gmusicbrowser_songs.pm:1935` from the song field definitions — shared core the
+renderer must not load. So `_MarkupUsesFields` counts **any** field sigil
+instead.
+
+The divergence is deliberately on the safe side (an unmapped `%X` is reported,
+not drawn literally) and changes nothing for the bundled layouts: every sigil
+in their `markup=` values is a real field — `%a` 13, `%t` 13, `%l` 12, `%s` 7,
+`%y` 3, `%m` 2, `%Y` 1, `%g` 1, plus the `$album`/`$artist`/`$length`/
+`$title_or_file`/`$track` aliases.
+
+### Verification for this increment
+
+- `t/gtk4/30_Box.t` fails **6 of 157** against a pristine `git archive HEAD`
+  on real Wayland; `t/04_Gtk4LayoutRenderer.t` fails **10 of 293** offline.
+- Pristine failure values confirmed as the right reason: every markup label is
+  empty, and the precedence assertion fails `got 'ignored' / expected 'big'`,
+  which is the `text=` the old renderer shows.
+- The offline comparison needs `UnhandledGlobals` and `_MarkupUsesFields`
+  stubbed into the pristine copy. `_Markup`, the sentinel, and the
+  `%LabelHandled` entry were confirmed absent before it was trusted.
+- **Every "is reported" assertion is a control here**, because pristine reports
+  `markup` for *all* values, being wholly unimplemented. What discriminates is
+  the rendering: `get_text` against `get_label`, the `xx-large` measurement,
+  and the precedence over `text=`.
+- Eight assertions check the validation sentinel never survives on any label —
+  on the applied, refused, and field-bearing paths. Controls, but they guard the
+  one way this mechanism could leave a visible artifact.
+
+## This session's first increment: layout-level option inheritance
 
 `DefaultFont` and `DefaultFontColor` are layout properties, not widget
 options. Legacy `InitLayout` reads them into `{global_options}`
@@ -135,7 +245,7 @@ the decision gate on each row without advancing it. No row was advanced to
 
 Last session: 2026-09-07. Branch `gtk4-alpha`.
 
-**Decision state.** D023–D032 are all **Accepted**. Four entries remain
+**Decision state.** D023–D033 are all **Accepted**. Four entries remain
 **Proposed** — D009, D011, D012, D019 — and those are pre-existing and
 unrelated to the layout rows. Do not mistake them for a cleared backlog.
 
@@ -508,6 +618,8 @@ Everything is committed. For the number of commits past `master`, run
 `git rev-list --count master..HEAD` rather than trusting a figure here.
 Newest first:
 
+	23ea469 gtk4: apply a static markup= on a label
+	2027830 docs: record D032 and the layout option inheritance results
 	1bf528a gtk4: inherit the layout-wide DefaultFont and DefaultFontColor
 	fddcf65 docs: record D031 and the label font/color CSS results
 	c97247b gtk4: apply the legacy label font and color options through CSS
@@ -536,10 +648,11 @@ Newest first:
 	d4c87d0 agents file
 	774aa2e initial plan
 
-This session's increment touched no shared code. It changed
+Neither of this session's increments touched shared code. Both changed
 `gmusicbrowser_gtk4_layout.pm`, `t/04_Gtk4LayoutRenderer.t`, and
-`t/gtk4/30_Box.t`, and added `t/layouts/inherit.layout`. Documentation is
-committed separately, as before.
+`t/gtk4/30_Box.t`; the first added `t/layouts/inherit.layout` and the second
+`t/layouts/markup.layout`. Documentation is committed separately from code, as
+before.
 
 The `font=`/`color=` CSS increment before it changed
 `gmusicbrowser_gtk4_layout.pm`, `t/04_Gtk4LayoutRenderer.t`,
@@ -759,9 +872,10 @@ value outside the mapping.
 are left-aligned rather than centred, and `xalign`/`yalign`/`ellipsize` are
 applied. See D028, now Accepted. A label's `ellipsize=1` is normalised to
 `'end'` under its alternative 2, which is the one accepted parity exception in
-the renderer: GTK3 leaves such a label un-ellipsized. `%LabelHandled` covers `text`, `xalign`, `yalign`,
-`ellipsize`, `minwidth`, `minheight`, `font`, and `color`; `markup`,
-`minsize`, and `expand_max` stay reported. `font=`/`color=` land through a
+the renderer: GTK3 leaves such a label un-ellipsized. `%LabelHandled` covers `text`, `markup`, `xalign`, `yalign`,
+`ellipsize`, `minwidth`, `minheight`, `font`, and `color`; `minsize` and
+`expand_max` stay reported, and so does a `markup=` that names a song field or
+cannot be parsed. `font=`/`color=` land through a
 `GtkCssProvider` under D031, with `font=` expressed as a ratio of the desktop
 font rather than as absolute points. Under D032 a label with neither option
 inherits the layout's `DefaultFont`/`DefaultFontColor` through the same
@@ -1230,23 +1344,27 @@ Commands that were actually run and passed this session:
 	make test-gtk3
 	git diff --check
 
-`make test-modernization`: **415** executed assertions passed, no skips.
+`make test-modernization`: **458** executed assertions passed, no skips.
 Running totals: 269 three sessions ago, 298 after `Next`/`Prev`, 315 after
 `Filler`, 317 after the labels fixture, 325 after `size=`/`relief=`, 342 after
 label alignment, 344 after the `ellipsize=1` normalisation, 364 after the `AB`
 constraint layout, 395 after the label `font=`/`color=` CSS, 415 after the
-`DefaultFont`/`DefaultFontColor` inheritance. The skip count was
-read from `prove -v`, not assumed.
+`DefaultFont`/`DefaultFontColor` inheritance, 458 after the static `markup=`.
+The skip count was read from `prove -v`, not assumed.
 
-`make test-gtk4` on the real Wayland connection: **323** TAP results,
-comprising **317 executed assertions passed** and the same six pre-existing M1
+`make test-gtk4` on the real Wayland connection: **337** TAP results,
+comprising **331 executed assertions passed** and the same six pre-existing M1
 feasibility probes skipped, 0 failures. Per file: 18 binding (which is where
-all six skips live), 4 proof-of-life, 84 pane, 143 box, 74 icon. Running totals
+all six skips live), 4 proof-of-life, 84 pane, 157 box, 74 icon. Running totals
 for the same command: 173 before `Next`/`Prev`, 184 after it, 202 after
 `Filler`, 216 after the `AB` coverage, 246 after `size=`/`relief=`, 258 after
 label alignment, 261 after the `ellipsize=1` normalisation, 287 after the `AB`
-constraint layout, 304 after the label `font=`/`color=` CSS, 323 now. Do not
-restate this as 317 passing assertions. The six skips were counted by copying the runner to
+constraint layout, 304 after the label `font=`/`color=` CSS, 323 after the
+inheritance, 337 now. Do not restate this as 331 passing assertions.
+
+Two GTK `Failed to set text ... from markup` warnings are expected in this run,
+one per refused value in `t/layouts/markup.layout`. They are GTK warnings, not
+Perl ones, and cannot be suppressed from Perl. Do not hide them. The six skips were counted by copying the runner to
 `tools/.verbose-smoke-tmp`, switching `prove` to `-v`, and grepping
 `^ok [0-9]+ # skip` — six matches, all `BLOCKED:` M1 probes in
 `t/gtk4/00_Binding.t`. Not assumed. Note that a copy of the runner placed
@@ -1419,17 +1537,30 @@ means the reported ~1190px window is not the layout's designed size.
    they belong to the skin machinery, which has no GTK4 work yet. That is the
    remaining half of `{global_options}` and needs a skin design first.
 
-0b. **More of the `Layout::Label` family** is now the strongest candidate, and
-   D032 raises its value. The family is `Text`, `Pos`, `Title`, `Title_by`,
-   `Artist`, `Album`, `Year`, `Comment`, `Length`, `PlayingTime`, `Volume`,
-   `Visuals`, `LabelToggleButtons`, with `Label` an alias for `Text`; only
-   `Text`/`Label` is implemented. Implementing `Title`/`Artist`/`Album` would:
-   - make D031's `font=` reachable from a shipped layout for the first time —
-     all four bundled `font=` uses are on `Title`/`Artist`/`Album`/`Date`;
-   - make five of D032's six bundled global uses reachable, since all five
-     unreachable ones sit in layouts whose labels are exactly these elements;
-   - need the song-field state path, which is the real cost and is shared with
-     `markup=`. Scope that first.
+0b. **The song-field state path is now the single gate on everything left in
+   `Layout::Label`,** and it should probably be the next increment because so
+   much converges on it. What it unlocks:
+   - the **54** field-bearing `markup=` uses, the remainder of D033;
+   - the whole rest of the family — `Pos`, `Title`, `Title_by`, `Artist`,
+     `Album`, `Year`, `Comment`, `Length`, `PlayingTime`, `Volume`, `Visuals`,
+     `LabelToggleButtons`, with `Label` an alias for `Text`. **Every one of
+     them carries a `markup` in its own widget-table defaults**
+     (`gmusicbrowser_layout.pm:246-333`) — `Title` is
+     `'<b><big>%S</big></b>%V'`, `Artist` is `'<b>%a</b>'`. The markup *is* the
+     widget, so none can be implemented without this path. An earlier version
+     of this file recommended the family as a smaller step than `markup=`;
+     that was wrong, and reading the widget table is what shows it.
+   - once those land, D031's `font=` becomes reachable from a shipped layout
+     for the first time (all four bundled uses are on
+     `Title`/`Artist`/`Album`/`Date`) and five of D032's six bundled global
+     uses become reachable too.
+
+   Scope it as the state path, not as a widget: `::UsedFields`,
+   `Songs::Depends`, `::WatchSelID`, `::ReplaceFieldsAndEsc`, and
+   `markup_empty` for the no-song case (`:3178-3183`). `%::ReplaceFields` is
+   built from the shared song field definitions at
+   `gmusicbrowser_songs.pm:1935`, so this crosses the frontend boundary and
+   needs a GTK3 pass.
 
 1. ~~Decide the six Proposed entries.~~ **Done.** D023, D024, D025, D026,
    D027, and D028 are all Accepted. The recorded resolutions, so a later
@@ -1564,9 +1695,29 @@ means the reported ~1190px window is not the layout's designed size.
   tree.** `Destroy` must call `remove_provider_for_display`, which exists and
   works.
 - **Isolating an option with `[(,]option=` misses a space after the comma.**
-  `[(,]markup=` reports 74 where the real count is **76**: two uses in
-  `songtree.layout` are written `, markup=`. Allow optional whitespace, and
-  treat the recorded 76 as correct.
+  `[(,]markup=` reports 74 where the whitespace-tolerant grep reports **76**:
+  two uses in `songtree.layout` are written `, markup=`. Allow optional
+  whitespace.
+- **But that 76 is not 76 label options** — a grep count over `layouts/` mixes
+  three populations, and D033 corrects it. It is **56** real `markup=` options
+  in layout blocks, **19** SongTree drawing-layer uses inside
+  `{Group ...}`/`{Column ...}` skin blocks, and **1** commented-out line. Only
+  **2** of the 56 are static. So before an option count drives a decision,
+  split it by block type and drop comment lines: `grep` sees a `{Group}` skin
+  block and a `[layout]` block identically, and the parser's own catalog is the
+  reliable way to count. The already-recorded `shimmer.layout:132`
+  `color='#ccc'` drawing-layer trap is the same mistake caught once before.
+- **`markup=` was two options all along.** Legacy `Layout::Label` branches at
+  `gmusicbrowser_layout.pm:3156` on whether `::UsedFields` finds song fields:
+  a field-free value is set once, a field-bearing one subscribes through
+  `WatchSelID`. Look for a legacy class making such a split before scoping an
+  option as one unit — half of this one needed no state at all.
+- **Probe a retained-state behaviour from a non-default starting state.** The
+  first `set_markup` probe concluded "on failure `get_text` returns empty".
+  That was an artifact of building the probe labels with
+  `Gtk4::Label->new('')`: the *retained previous text* was empty. Over a
+  non-empty label the failure leaves the previous text intact. Implementing the
+  first reading would have reported a valid `<b></b>` as refused.
 - **A widget's own CSS padding falsifies a geometry probe.** A `Gtk4::Button`
   asked for `set_size_request(40,24)` measures 26px wide at a 7px inset,
   because the theme's button style insets the allocation; a `Gtk4::Label`

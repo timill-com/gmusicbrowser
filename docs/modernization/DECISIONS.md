@@ -1639,6 +1639,166 @@ that the overriding label lacks `dim-label`, which passes against a renderer
 that never applies `dim-label` to anything. It is now paired with an assertion
 that the inheriting and overriding labels differ from each other.
 
+## D033 — A static `markup=` is applied; a field-bearing one waits for song state
+
+Status: **Accepted**
+
+Gate: the field-bearing half needs the song-field state path, which is
+unported
+
+Context:
+
+`markup=` was the dominant unported label option. Reading
+`Layout::Label` showed it is not one option but two paths, split in the legacy
+code itself at `gmusicbrowser_layout.pm:3156`:
+
+	if (exists $opt->{markup})
+	{	my $m=$opt->{markup};
+		if (my @fields=::UsedFields($m))
+		{	$self->{EndInit}=\&init;	# WatchSelID, re-render per song
+		}
+		else { $self->set_markup($m) }
+	}
+	elsif (exists $opt->{text}) { $label->set_text($opt->{text}) }
+
+A value naming no song field is set **once**, with no subscription and no song
+data. That half is a presentation option and is what this entry ports.
+
+**The recorded count of 76 conflates three different things.** It is
+arithmetically right for `[(,] *markup=` across `layouts/`, but it reconciles
+as:
+
+| | count |
+|---|---:|
+| real `markup=` options in layout blocks | **56** |
+| SongTree drawing-layer uses inside `{Group ...}`/`{Column ...}` skin blocks | 19 |
+| commented-out layout-block line | 1 |
+| total matching the recorded grep | 76 |
+
+The 19 skin-block uses are the `text(markup=...)` drawing DSL, with `pesc()`,
+`.` concatenation, `$_row` and `myfont` — the same class of thing as the
+already-recorded `shimmer.layout:132` `color='#ccc'` drawing-layer trap. They
+are not label options and no label port will ever reach them. The figure that
+matters for a renderer increment is **56**, confirmed independently by walking
+the parser's own catalog rather than by grep.
+
+Of those 56, exactly **2 are static**:
+
+| where | widget | value |
+|---|---|---|
+| `makeitlooklike.layout:481` | `Text` | `/` |
+| `shimmer.layout:119` | `Label0` | `<span size="xx-large" weight="ultrabold">«</span>` |
+
+Both land on already-implemented elements, so this is reachable from shipped
+layouts today. The other 54 name fields (`%a` 13, `%t` 13, `%l` 12, `%s` 7,
+`%y` 3, `%m` 2, `%Y` 1, `%g` 1, and the `$album`/`$artist`/`$length`/
+`$title_or_file`/`$track` aliases) and stay reported.
+
+Decision:
+
+`_ApplyLabelOptions` applies a field-free `markup=` with
+`Gtk4::Label::set_markup`, taking precedence over `text=` as `:3156` does. A
+field-bearing value is left untouched and reported through `Unhandled`.
+
+**Malformed markup needs a decision because GTK4 gives no usable signal.**
+Measured through this binding: `set_markup` does **not** die, and its warning
+is a GTK warning on stderr, not a Perl warning — `$SIG{__WARN__}` captures
+nothing. On failure it leaves the *displayed* text untouched while
+`get_label` still returns the raw string, so the widget silently keeps whatever
+it had. Pango is unreachable through this binding, so
+`Pango::parse_markup` is not available to validate with.
+
+The renderer therefore sets the markup over a sentinel string the markup itself
+cannot produce, and treats the value as refused if the text did not move. A
+refused value falls back to `set_text` of the raw string, so a typo shows its
+own source rather than producing an invisible widget, and the option is
+reported.
+
+Field detection counts **any** field sigil (`%<letter>`, `$name`, `${expr}`)
+rather than only one `%::ReplaceFields` defines. `::UsedFields`
+(`gmusicbrowser.pl:1012`) maps the letters through that table and keeps only
+defined ones, but the table is built from the song field definitions at
+`gmusicbrowser_songs.pm:1935` — shared core the renderer must not load. The
+divergence is deliberately on the safe side: an unmapped `%X` is reported
+rather than drawn as literal text. It changes nothing for the bundled layouts,
+whose values name only real fields.
+
+Alternatives:
+
+1. Implement both halves, including `::UsedFields`, `WatchSelID`, and per-song
+   re-rendering. Offered to the user and declined for this increment: it is a
+   subsystem port — song selection state, field dependency tracking, and an
+   update subscription — not a presentation option. It remains the gate on the
+   other 54 uses and on the whole `Layout::Label` family.
+2. Refuse to render any `markup=`, per D029 clause 2. Rejected on D029's own
+   terms: the entry says explicitly that clause 2 must not be read as refusing
+   a not-yet-ported option, and `Unhandled` is the mechanism for one.
+3. Pass a malformed value straight to `set_markup` and let GTK warn. Rejected:
+   the label would keep whatever text it had, the option would not be reported,
+   and the warning is the only symptom — the silent acceptance the project
+   constraints forbid.
+4. Leave a refused label empty rather than showing its raw markup. Rejected by
+   the user: a typo'd layout would give a widget that has vanished, which is
+   harder to diagnose than one showing its own source.
+5. Detect failure by checking for empty text. Rejected as **wrong**, not merely
+   worse: `''` and `<b></b>` are both valid and legitimately render nothing, so
+   this would misclassify them as refused. See the note below on how this was
+   nearly recorded as the mechanism.
+
+Consequences:
+
+`markup` leaves `%LabelHandled`'s ignored list conditionally — reported when it
+names a field or cannot be parsed, silent when applied. That conditional shape
+already exists for `size=` (D027) and `font=`/`color=` (D031).
+
+No layout-visible name changes, so the D002 surface is untouched, and there is
+no presentation change beyond rendering the markup the layout asked for, which
+keeps this inside D013.
+
+**A refused value still prints one GTK warning to stderr** during the
+validation attempt. It cannot be suppressed from Perl. Two appear during
+`make test-gtk4`, one for each refused value in the fixture; they are expected
+and must not be hidden.
+
+Evidence or removal condition:
+
+`t/gtk4/30_Box.t` measures that a markup naming `xx-large` renders taller than
+plain text carrying the same content, reads `get_text` against `get_label` to
+tell a parsed markup from one drawn literally, and covers the precedence over
+`text=`, the malformed fallback, and the field-bearing report.
+`t/04_Gtk4LayoutRenderer.t` covers the same offline plus the field detection
+table and that the validation sentinel never survives on any label.
+
+Run against the previous renderer, `t/gtk4/30_Box.t` fails **6 of 157** on real
+Wayland and `t/04_Gtk4LayoutRenderer.t` fails **10 of 293** offline. The
+pristine failure values were confirmed to be the right reason: the markup
+labels are all empty, and the precedence assertion fails with
+`got 'ignored' / expected 'big'`, which is the `text=` the old renderer shows.
+The offline comparison needs `UnhandledGlobals` and `_MarkupUsesFields` stubbed
+into the pristine copy; `_Markup`, the sentinel, and the `%LabelHandled` entry
+must be confirmed absent before it is trusted.
+
+Controls passing on both trees: every `text=` assertion, every "is reported"
+assertion (pristine reports `markup` for *all* values, being wholly
+unimplemented), the field-detection table, and the eight sentinel-leak
+assertions.
+
+**The near-miss worth recording, because the method produced a wrong reading
+that looked convincing.** The first probe concluded "on failure `get_text`
+returns empty, so empty means refused". That was an artifact of the probe's own
+fixture: the labels were built with `Gtk4::Label->new('')`, so the *retained
+previous text* was empty. Re-probing over a non-empty label showed `set_markup`
+leaves the previous text — `SENTINEL`, then `previous` — untouched. Had the
+first reading been implemented, a valid `<b></b>` would have been reported as
+refused. **Probe a retained-state behaviour from a non-default starting state**,
+or the default masks what is actually retained.
+
+The offline `Gtk4::Label` double reproduces all of this, and its markup
+stripper was validated against the real binding on all 11 probe cases —
+including the three malformed classes (unclosed tag, unknown tag, unknown
+entity) and the two validly-empty ones — rather than being written to satisfy
+the test.
+
 ## Decision template
 
 Copy this section for new decisions:

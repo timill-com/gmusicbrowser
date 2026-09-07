@@ -44,6 +44,7 @@ surface. Numeric suffixes retain the base element's behaviour.
 | `size=`/`relief=` on any button | GTK4 in progress, see D027 (accepted) |
 | `xalign=`/`yalign=`/`ellipsize=` on `Label`/`Text` | GTK4 in progress, see D028 (accepted) |
 | `font=`/`color=` on `Label`/`Text` | GTK4 in progress, see D031 (accepted) |
+| static `markup=` on `Label`/`Text` | GTK4 in progress, see D033 (accepted) |
 | `DefaultFont`/`DefaultFontColor` layout-wide inheritance | GTK4 in progress, see D032 (accepted) |
 | `tip=` tooltip option on the above | GTK4 in progress, literal tips only |
 | `AABox`, `AASearch`, `AddLabelEntry`, `Album`, `AlbumBox`, `AlbumSearch`, `Artist`, `ArtistBox`, `ArtistPic`, `ArtistSearch`, `BContext`, `Button`, `Choose`, `ChooseRandAlbum`, `Comment`, `Connections`, `Context`, `Cover`, `Date`, `EditList`, `EditListButtons`, `EmptyList`, `Equalizer`, `EqualizerPresets`, `EqualizerPresetsSimple`, `EventBox`, `FBox`, `FLock`, `FPane`, `Filter`, `FilterBox`, `FilterLock`, `FilterPane`, `Fullscreen`, `HSeparator`, `HistItem`, `LSortItem`, `LabelTime`, `LabelToggleButtons`, `LabelVol`, `LabelsIcons`, `LayoutItem`, `Length`, `Lock`, `LockAlbum`, `LockArtist`, `LockSong`, `MainMenuItem`, `MenuItem`, `OpenBrowser`, `OpenContext`, `OpenQueue`, `PFilterItem`, `PSortItem`, `PictureBrowser`, `PlayFilter`, `PlayItem`, `PlayList`, `PlayOrderCombo`, `PlayingTime`, `Pos`, `Pref`, `Progress`, `ProgressV`, `Queue`, `QueueActions`, `QueueFilter`, `QueueItem`, `QueueList`, `Refresh`, `Repeat`, `ResetFilter`, `Scale`, `SeparatorMenuItem`, `ShuffleList`, `SimpleSearch`, `SongInfo`, `SongList`, `SongSearch`, `SongTree`, `Sort`, `Stars`, `TabbedLists`, `Time`, `TimeBar`, `TimeSlider`, `Title`, `Title_by`, `TogButton`, `ToggleButton`, `Total`, `VProgress`, `VSeparator`, `Visuals`, `Vol`, `VolBar`, `VolSlider`, `Volume`, `VolumeBar`, `VolumeIcon`, `VolumeSlider`, `Year` | Not started |
@@ -198,16 +199,46 @@ shorthand is normalised, and a
 non-numeric `xalign`/`yalign`, which falls back to the legacy default as GTK3's
 own coercion does. Both stay reported through `Unhandled`.
 
-Still unhandled for labels: `markup` (**76** uses), which needs `::UsedFields`
-and per-song substitution, and `minsize`/`expand_max`, which drive the legacy
-scrolling-label machinery. Both belong with a real `Layout::Label` port.
-`font` and `color` were listed here too until D031 implemented them through a
-CSS provider; that paragraph is below.
+A static `markup=` is now applied, as **D033** (status **Accepted**). Legacy
+`Layout::Label` splits the option in two at `gmusicbrowser_layout.pm:3156`: a
+value `::UsedFields` finds song fields in subscribes through `WatchSelID` and
+re-renders per song, and anything else is set once with `set_markup`. Only the
+second half needs no state, so it is what is ported; `markup=` takes precedence
+over `text=`, as `:3156` does.
+
+**The recorded count of 76 conflated three things and is corrected.** It is
+right for `[(,] *markup=` across `layouts/`, but reconciles as **56** real
+`markup=` options in layout blocks, **19** SongTree drawing-layer uses inside
+`{Group ...}`/`{Column ...}` skin blocks, and **1** commented-out line. The 19
+are the `text(markup=...)` drawing DSL — with `pesc()`, `.` concatenation,
+`$_row`, `myfont` — the same class as the recorded `shimmer.layout:132`
+`color='#ccc'` trap, and no label port will reach them. The figure that matters
+for the renderer is **56**, confirmed by walking the parser's catalog rather
+than by grep.
+
+Of those 56, exactly **2 are static** and both land on already-implemented
+widgets: `Text(markup="/")` in `makeitlooklike.layout:481` and `Label0` with an
+`xx-large` span in `shimmer.layout:119`. The other 54 name fields and stay
+reported through `Unhandled`, gated on the song-field state path.
+
+Malformed markup is handled rather than passed through, because GTK4 gives no
+usable signal: `set_markup` neither dies nor raises a trappable Perl warning,
+and on failure leaves the displayed text untouched while `get_label` keeps the
+raw string. The renderer sets the markup over a sentinel and checks whether the
+text moved, then falls back to plain text so a typo shows its own source rather
+than an invisible widget, and reports the option. **A refused value still
+prints one GTK warning to stderr**, which cannot be suppressed from Perl.
+
+Still unhandled for labels: the 54 field-bearing `markup=` uses, and
+`minsize`/`expand_max`, which drive the legacy scrolling-label machinery. Both
+belong with a real `Layout::Label` port. `font` and `color` were listed here
+too until D031 implemented them through a CSS provider; that paragraph is
+below.
 Counting `markup` needs the same care as the widget counts: the bundled layouts
 also carry 24 `lmarkup=`, 11 `mmarkup=`, 2 `markup_empty=`, and 2
 `init_markup=`, and a bare `grep -o 'markup='` reports 113 by matching inside
-the first three. A `[(,]markup=` filter undercounts at 74 because two uses
-start a continuation line.
+the first three. A `[(,]markup=` filter reports 74 because two uses start a
+continuation line; allowing optional whitespace gives the 76 above.
 The `Layout::Label` family is `Text`, `Pos`, `Title`, `Title_by`, `Artist`,
 `Album`, `Year`, `Comment`, `Length`, `PlayingTime`, `Volume`, `Visuals`, and
 `LabelToggleButtons`, with `Label` an alias for `Text`; only `Text`/`Label` is

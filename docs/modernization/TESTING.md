@@ -10,14 +10,14 @@ make test-modernization
 
 This runs the neutral layout parser, frontend contract and lifecycle, legacy
 adapter and lifecycle integration, and GTK4 renderer contract tests. On
-2026-09-07 it reported 415 executed assertions passed and no skips. Running
+2026-09-07 it reported 458 executed assertions passed and no skips. Running
 totals: 269 two sessions ago, 298 after `Next`/`Prev`, 315
 after `Filler`, 317 after the shared labels fixture, 325 after the
 `size=`/`relief=` increment, 342 after label alignment/ellipsize, 344 after the
 `ellipsize=1` normalisation, 364 after the `AB` constraint layout, 395 after
 the label `font=`/`color=` CSS, 415 after the `DefaultFont`/`DefaultFontColor`
-inheritance. The skip count was read from `prove -v`, not
-assumed. The
+inheritance, 458 after the static `markup=`. The skip count was read from
+`prove -v`, not assumed. The
 renderer test uses small in-process GTK doubles; it proves the
 parser/renderer/command wiring without claiming that a real GTK4 binding or
 display passed.
@@ -76,16 +76,23 @@ before [move-handle](https://docs.gtk.org/gtk4/signal.Paned.move-handle.html).
 
 `t/gtk4/30_Box.t` adds real `HB`/`VB` packing geometry to the runner, plus the
 `AB`, label alignment, and label styling coverage. On 2026-09-07, after the
-`DefaultFont`/`DefaultFontColor` inheritance, the full
-`make test-gtk4` run reported 323 TAP results: 317 executed assertions passed
+static `markup=`, the full
+`make test-gtk4` run reported 337 TAP results: 331 executed assertions passed
 and the same six feasibility probes were skipped, 0 failures. The skips were
 counted from `prove -v` and are the same six M1 probes as before. Running
 totals for the same command: 173 results before `Next`/`Prev`, 184 after it,
 202 after `Filler`, 216 after the `AB` alignment coverage, 246 after
 `size=`/`relief=`, 258 after label alignment, 261 after the `ellipsize=1`
 normalisation, 287 after the `AB` constraint layout, 304 after the label
-`font=`/`color=` CSS, 323 after the inheritance. Per file: 18 binding, which is
-where all six skips live, 4 proof-of-life, 84 pane, 143 box, 74 icon.
+`font=`/`color=` CSS, 323 after the inheritance, 337 after the static
+`markup=`. Per file: 18 binding, which is
+where all six skips live, 4 proof-of-life, 84 pane, 157 box, 74 icon.
+
+**Two GTK `Failed to set text ... from markup` warnings are expected** in this
+run, one per refused value in `t/layouts/markup.layout`. They are GTK warnings
+rather than Perl ones — `$SIG{__WARN__}` does not see them — and cannot be
+suppressed from Perl, because validating a markup means attempting it. Do not
+hide them or read them as failures.
 
 The `AB` constraint-layout assertions are behaviour, not construction. Against
 the previous renderer, `t/gtk4/30_Box.t` fails **11 of 107** on real Wayland
@@ -187,6 +194,42 @@ The measured values, from a probe inside the runner, with `Text` under
 `Text2` and `Text3` are what pin the per-option independence: overriding one
 global leaves the other applied. `Text4` is what pins that a widget's own
 refused value does not fall through to the global, matching legacy `||`.
+
+The static `markup=` assertions (D033) are rendering behaviour on Wayland and a
+mix of rendering and bookkeeping offline. Against the previous renderer,
+`t/gtk4/30_Box.t` fails **6 of 157** on real Wayland and
+`t/04_Gtk4LayoutRenderer.t` fails **10 of 293** offline. The pristine failure
+values were confirmed to be the right reason: every markup label is empty, and
+the precedence assertion fails `got 'ignored' / expected 'big'`, which is the
+`text=` the old renderer shows.
+
+Five things to know before extending them:
+
+- **Every "is reported" assertion is a control**, because the previous renderer
+  reports `markup` for *all* values, being wholly unimplemented. What
+  discriminates is the rendering: `get_text` against `get_label`, the
+  `xx-large` measurement, and the precedence over `text=`.
+- **`get_text` and `get_label` are different observables and both are needed.**
+  `get_label` returns the raw markup string, `get_text` the parsed text. A
+  label showing its markup literally and one parsing it correctly have the same
+  `get_label`, so only `get_text` distinguishes them.
+- **A markup measurement needs a size in the markup and identical content.**
+  The `xx-large` span measures 36px against 21px plain in the runner. A markup
+  naming only `<b>` would not discriminate reliably.
+- **The offline `Gtk4::Label` double's markup stripper was validated against
+  the real binding on all 11 probe cases** — the three malformed classes
+  (unclosed tag, unknown tag, unknown entity) and the two validly-empty ones
+  (`''`, `<b></b>`) included — rather than written to satisfy the test. If it
+  is extended, re-validate it the same way; a double that accepts what Pango
+  refuses makes the reporting assertions pass for the wrong reason. The double
+  also had to be corrected to report `''` rather than `undef` from `get_text`
+  on a fresh `Label->new('')`, which is what the real binding does.
+- **Two GTK warnings are emitted by these tests** and are expected; see above.
+
+Eight offline assertions check that the validation sentinel never survives on
+any label — on the applied, refused, and field-bearing paths. They are controls
+on both trees, but they guard the one way this mechanism could leave a visible
+artifact, which a rendering assertion would not catch.
 
 A `font-size` assertion also only discriminates away from the theme size: with
 the desktop at `Roboto 10`, a `10pt` rule measures identically to no rule at
