@@ -1,7 +1,9 @@
 # Session handoff
 
-Status: `-symbolic` icon fallback committed as `978bbdf`; the `Stop` widget and
-a `%Buttons` table for stateless command buttons are uncommitted in the tree
+Status: `HEAD` is `4ed26ad` "gtk4: render the Stop widget from a stateless
+button table". Uncommitted on top of it: the `Next`/`Prev` increment, which
+includes the first shared-boundary change of the port and a working GTK3
+regression smoke.
 
 Last session: 2026-09-07. Branch `gtk4-alpha`.
 
@@ -13,8 +15,8 @@ previous session stopped and what the next one should verify before continuing.
 The GTK4 work is an early spike, not a partly-finished migration. Do not assume
 otherwise from the size of the planning documents.
 
-- `gtk4-alpha` is three commits past `master`: `initial plan`, `agents file`,
-  `initial gtk4 stubs`.
+- `gtk4-alpha` is six commits past `master`: `initial plan`, `agents file`,
+  `initial gtk4 stubs`, then the box/icon, `-symbolic`, and `Stop` commits.
 - All 1,444 `Gtk3::` references are still present and unmodified across 27
   files. None has been ported.
 - GTK3 is the complete, working application (about 33,000 lines in the main
@@ -24,18 +26,44 @@ otherwise from the size of the planning documents.
 
 ## What is committed and what is not
 
-The previous session's work **is committed**. `HEAD` is `e016554`
-"gtk4: correct box packing geometry and resolve icons by theme name", and
-`gtk4-alpha` is four commits past `master`. An earlier revision of this file
-claimed that work was uncommitted and listed a `git status` that no longer
-applies; that listing has been removed rather than corrected, because it
-described a tree state that no longer exists.
+Everything through the `Stop` widget is committed; `HEAD` is `4ed26ad` and
+`gtk4-alpha` is six commits past `master`.
 
-The `-symbolic` fallback and the verification corrections below are committed
-as `978bbdf`. Uncommitted on top of it is the `Stop` widget increment.
+Uncommitted in the tree is the `Next`/`Prev` increment:
 
-No GTK3 production code, bundled layout, or file in `pix/` has been touched in
-either. `t/layouts/buttons.layout` is the only added file.
+	M Makefile
+	M docs/modernization/DECISIONS.md
+	M docs/modernization/PARITY_CHECKLIST.md
+	M docs/modernization/SESSION_HANDOFF.md
+	M docs/modernization/TESTING.md
+	M gmusicbrowser_frontend_legacy.pm
+	M gmusicbrowser_gtk4.pl
+	M gmusicbrowser_gtk4_layout.pm
+	M t/04_Gtk4LayoutRenderer.t
+	M t/05_FrontendLegacy.t
+	M t/06_LifecycleLegacy.t
+	M t/gtk4/20_Paned.t
+	M t/gtk4/30_Box.t
+	M t/gtk4/40_Icons.t
+	M t/layouts/buttons.layout
+	?? tools/run-gtk3-smoke
+
+No GTK3 production code, bundled layout, or file in `pix/` has been touched.
+`gmusicbrowser.pl` is unmodified. `tools/run-gtk3-smoke` is the only added
+file this session; `t/layouts/buttons.layout` was added by the previous one.
+
+## Renderer widget state
+
+Widget elements implemented: `Label`, `Text`, `Play`, `Quit`, `Stop`, `Next`,
+`Prev` — 7 of the ~100 in the layout compatibility surface. This is still the
+real bottleneck: containers cover 8 of 15 types and are well ahead of anything
+to put in them.
+
+The three `%Buttons` entries (`Prev`, `Stop`, `Next`) exhaust the stateless
+transport buttons whose commands the bridge exposes. Adding another means
+either widening `@Commands` again — now a proven, cheap operation with
+`make test-gtk3` available — or implementing a stateful button, which needs a
+state getter and an event subscription the way `Play` does.
 
 ## Renderer container state, carried forward
 
@@ -60,7 +88,114 @@ which reproduces both groups' legacy order including interleaved `-a b -c d`.
 exists yet. `_CreatePaned` implements `PanedPack`, and `_CreateSingle` covers
 `SB`, `FR`, `EB`, `AB`, and `WB`.
 
-## This session: the `-symbolic` fallback (D024)
+## This session: `Next` and `Prev`, and the first shared-boundary change
+
+`Next` and `Prev` are now rendered, and `@Commands` in
+`gmusicbrowser_frontend_legacy.pm` was widened to expose `NextSong` and
+`PrevSong`. That bridge list is shared code, so this is the first
+shared-boundary change of the port.
+
+Why these two: they are the most-used unported simple buttons in the bundled
+layouts. Counting actual widget instances, `Next` appears **34** times and
+`Prev` **29**, against 20 for `Stop`. Both are Tier-1 stateless buttons, and
+the renderer side was two `%Buttons` entries.
+
+Those counts are hard to get right and three earlier readings disagreed, so the
+method matters. A naive `grep -c` overcounts (`group=Next`, and three
+`titlebar.layout` `Name=` lines that read "Stop, Play and Next buttons"); a
+line-based grep undercounts because one line often holds `Prev Stop Play Next`;
+and a token pass that splits on `=` misses the continuation lines in
+`contrib.layout` and `makeitlooklike.layout`, whose children start with
+whitespace and have no `=` of their own. The figures above come from
+tokenizing every line, skipping only `Name=`/`Type=`/`Title=`/`Icon=`, taking
+the right-hand side only when the line actually starts with `word =`, then
+stripping trailing `\`, any option list, and any packing prefix before
+matching. An earlier handoff recorded 17 `Next` and 10 `Prev`; those do not
+reproduce by any counting method tried.
+
+`NextSong` and `PrevSong` take no widget argument in the core `%Command` table
+(`gmusicbrowser.pl:3489` and `3499`), which is what makes them safe to reach
+through the widget-free bridge. `t/05_FrontendLegacy.t` now asserts that the
+bridge *refuses to construct* when either definition is missing, so the
+allowlist cannot silently drift out of step with a `%Buttons` entry.
+
+### The renderer records what it ignores
+
+`Next` and `Prev` carry `options => 'nbsongs'`, `nbsongs => 10`, a `group`, and
+a `click3` that opens a song chooser. `click3` was not implemented — pointer
+input is not ported. Rather than accept `nbsongs`/`group` silently, the
+renderer now has an `Unhandled` accessor: `_CreateButton` records every option
+name outside `%ButtonHandled` (`icon`, `stock`, `text`, `tip`) against the
+widget's name, and leaves the parsed values untouched. That satisfies "unknown
+options are preserved and reported, not silently deleted" without inventing a
+diagnostics channel the renderer does not otherwise have.
+
+Two details worth carrying forward:
+
+- `Prev` is `group => 'Recent'`, not `'Next'`. Only `Next` is `group => 'Next'`.
+- GTK3 does **not** display the widget-table `text` for these buttons.
+  `Layout::Button` uses `text` only when `with_text` is set
+  (`gmusicbrowser_layout.pm:3047`) or when there is no `stock` at all (3062).
+  Since both have a `stock` default, `_"Next"` never appears in the GTK3 UI.
+  The GTK4 renderer keeps the same shape: `text` is a fallback used only when
+  no icon resolves, which offline is what the doubles see.
+- The `tip` labels must match the GTK3 widget table exactly: `Next` is
+  `_"Next Song"` and `Prev` is `_"Recently played songs"`. Both msgids already
+  exist in `po/`.
+
+### These two are the first real consumers of D024
+
+Measured inside the runner environment, Adwaita carries `media-skip-forward`
+and `media-skip-backward` **only** as `-symbolic`. Both buttons therefore
+resolve to the suffixed spelling while `Stop` still resolves the unsuffixed
+`media-playback-stop`. Without the D024 fallback these two widgets would have
+shown a text label on stock GNOME. This is direct evidence for moving D024 out
+of Proposed. The Wayland assertions accept either spelling so they do not pin
+one theme's convention.
+
+### The labels hash is now at twelve call sites
+
+The renderer constructor rejects a `labels` hash missing any `%Buttons`
+tooltip, so `next` and `prev` had to be added at eleven test call sites plus
+`gmusicbrowser_gtk4.pl`. The duplicated literal is now a genuine maintenance
+cost — the next widget with a tooltip will touch all twelve again. Extracting
+a fixture constant was deliberately **not** bundled here, per the previous
+handoff, but it should be the next cleanup.
+
+## The GTK3 regression smoke now exists
+
+The previous handoff recorded that there is no scripted GTK3 startup/shutdown
+smoke on this host. That is now wrong, and the reason it was believed was a
+misdiagnosis.
+
+`-nodbus -cmd Quit` *does* deliver the command: `gmusicbrowser.pl:1937` calls
+`run_command(undef,'Quit')`. The problem is that **`Quit` is not in the
+`%Command` fifo table at all** — it is a frontend lifecycle operation — so
+`run_command` warns `Unknown command 'Quit'` at line 1716 and the application
+simply keeps running. The earlier note "the command is not delivered" was
+wrong.
+
+`SIGTERM` is wired to `Quit` at `gmusicbrowser.pl:1938`, immediately before
+`Gtk3->main`. `tools/run-gtk3-smoke` (`make test-gtk3`) uses that: it starts
+GTK3 on the real Wayland connection with isolated config/data/cache/state,
+waits for the main loop, sends `SIGTERM`, and reports one TAP assertion on the
+exit status. It passes, and produces byte-identical diagnostics on the working
+tree and on a pristine `git archive` of HEAD — the same missing
+`Net::DBus::Annotation` for the MPRIS2 plugin, the same disabled mpv backend,
+the same single `gtk_widget_get_scale_factor` GTK critical, exit 0.
+
+Two traps it works around, both of which cost time:
+
+- `XDG_RUNTIME_DIR` must stay the host's. `use Gtk3 '-init'` at
+  `gmusicbrowser.pl:26` initialises GDK at compile time, so a temporary runtime
+  directory with a symlinked Wayland socket produces `cannot open display`
+  before any application code runs. Only config, data, cache, and state are
+  isolated. `-demo` additionally means the run never writes tags or settings.
+- gmusicbrowser outlives `timeout` and ignores a `SIGTERM` sent during startup,
+  so the runner traps `EXIT` and `SIGKILL`s the child. If you script GTK3 by
+  hand, check for and kill stray `gmusicbrowser.pl` processes afterwards.
+
+## Previous session: the `-symbolic` fallback (D024)
 
 The user's goal is that the OS icon theme supplies the artwork. D023 already
 resolves icons by name, so the assumption was that standard freedesktop names
@@ -84,7 +219,7 @@ Why this is inside D013: it changes no artwork, adds and removes no file, and
 changes no layout-visible name. It repairs resolution of infrastructure GTK4
 removed, which is the same ground D023 stands on. It is not a restyling.
 
-## Latest increment: the first stateless command button
+## Previous increment: the first stateless command button
 
 `Stop` is now rendered, as the first entry in a `%Buttons` table in
 `gmusicbrowser_gtk4_layout.pm`. The table keeps the field names
@@ -95,8 +230,9 @@ applies tooltips; neither `Play` nor `Quit` changed behaviour.
 Why `Stop` specifically, and nothing else in the same batch: the audited legacy
 bridge registers only `Play PlayPause Pause Stop IncVolume DecVolume TogMute`
 (`gmusicbrowser_frontend_legacy.pm:15`). `Stop` is the **only** simple
-transport button whose command is already reachable. `Next` (17 uses in bundled
-layouts) and `Prev` (10) map to `NextSong`/`PrevSong`, which exist in the core
+transport button whose command is already reachable. `Next` (34 instances in
+bundled layouts, corrected from the 17 recorded at the time) and `Prev` (29,
+corrected from 10) map to `NextSong`/`PrevSong`, which exist in the core
 `%Command` table at `gmusicbrowser.pl:1624-1625` but are **not** in the
 bridge's list. Porting them means widening a shared boundary, which needs its
 own GTK3 regression pass, so it was deliberately left out rather than bundled
@@ -154,9 +290,9 @@ user was not asked to, because no removal was proposed.
 
 ## Verification claims that did not reproduce
 
-Three recorded results were wrong. They are corrected in `TESTING.md`; the
-method that produced each bad reading is recorded because the same traps are
-easy to hit again.
+Four recorded results were wrong across the last two sessions. They are
+corrected in `TESTING.md`; the method that produced each bad reading is
+recorded because the same traps are easy to hit again.
 
 - **"Yaru theme", and `application-exit`/`view-refresh`/`edit-find` absent.**
   Yaru is not installed on this host at all. The desktop theme is **Tela**, and
@@ -172,10 +308,17 @@ easy to hit again.
   load and then calls the undefined `GMB::DBus::simple_call` at
   `gmusicbrowser.pl:512` anyway. A pristine `git archive` of HEAD fails
   identically, so it is pre-existing and not a GTK4 regression. The earlier
-  "exited zero" was most likely `tail`'s exit status from a pipeline. There is
-  currently **no** working scripted GTK3 startup/shutdown smoke on this host:
-  `-nodbus` does not deliver the command, the window stays open, and the
-  process outlives `timeout` and must be killed.
+  "exited zero" was most likely `tail`'s exit status from a pipeline. That much
+  still holds.
+- **"There is no working scripted GTK3 startup/shutdown smoke on this host",
+  and "`-nodbus` does not deliver the command".** Corrected this session. Both
+  are wrong. `-nodbus` delivers the command fine at
+  `gmusicbrowser.pl:1937`; `Quit` is simply not in the `%Command` fifo table,
+  so `run_command` warns `Unknown command 'Quit'` and the application keeps
+  running. `SIGTERM` *is* wired to `Quit` at `gmusicbrowser.pl:1938`, and
+  `make test-gtk3` uses it to get a passing startup/shutdown smoke. The bad
+  reading came from assuming the delivery path was broken instead of checking
+  whether the command name existed.
 
 ## Verification status: read this before claiming anything
 
@@ -197,30 +340,58 @@ parity. `AGENTS.md` forbids reporting a skipped or reasoned-about test as a pass
 The icon assertions are behaviour, not construction. Against the previous
 `_IconName`, `t/gtk4/40_Icons.t` fails 2 assertions, returning
 `application-exit` and `view-refresh` where Adwaita can render only the
-symbolic spellings. The `Stop` assertions likewise cannot pass against the
-previous renderer: both test files die with
-`GTK4 widget 'Stop' is not implemented`. Both were confirmed against a
-pristine `git archive` of the preceding commit.
+symbolic spellings.
+
+The `Next`/`Prev` assertions cannot pass against the previous tree either. The
+proof was run by extracting `git archive HEAD` to a scratch directory — the
+whole tree, so no file is missing — and overlaying only the changed test files
+and the fixture:
+
+- `t/04_Gtk4LayoutRenderer.t` and `t/gtk4/40_Icons.t` both die at
+  `t/layouts/buttons.layout:4: GTK4 widget 'Prev' is not implemented`.
+- `t/05_FrontendLegacy.t` fails 7 of 47 assertions, because the pristine bridge
+  neither exposes nor requires `NextSong`/`PrevSong`.
+- `t/06_LifecycleLegacy.t` passes against pristine. That is honest rather than
+  a gap: the two added names ride along in its command fixture, and its role is
+  startup/shutdown ordering, not the command allowlist. Do not cite it as
+  proof of this increment.
 
 Commands that were actually run and passed this session:
 
-	prove -I. t/02_LayoutParser.t t/03_FrontendContract.t \
+	perl -I. -c gmusicbrowser_frontend_legacy.pm
+	perl -I. -c gmusicbrowser_gtk4_layout.pm
+	perl -I. -c gmusicbrowser_gtk4.pl
+	perl -I. -c t/04_Gtk4LayoutRenderer.t t/05_FrontendLegacy.t \
+	      t/06_LifecycleLegacy.t t/gtk4/40_Icons.t     # one file per invocation
+	sh -n tools/run-gtk3-smoke
+	prove --norc -I. t/02_LayoutParser.t t/03_FrontendContract.t \
 	      t/04_Gtk4LayoutRenderer.t t/05_FrontendLegacy.t t/06_LifecycleLegacy.t
-	perl -c gmusicbrowser_gtk4_layout.pm
-	perl -c t/gtk4/40_Icons.t
 	make test-modernization
 	make test-gtk4
+	make test-gtk3
 	git diff --check
 
-`make test-modernization`: 269 executed assertions passed, no skips.
+`make test-modernization`: **298** executed assertions passed, no skips, up
+from 269. The skip count was read from `prove -v`, not assumed.
 
-`make test-gtk4` on the real Wayland connection: 173 TAP results, comprising
-167 executed assertions passed and the same six pre-existing feasibility
-probes skipped, 0 failures. That is 84 pane, 34 box, and 33 icon assertions
-plus the binding and proof-of-life files. Do not restate this as 173 passing
-assertions. The six skips were counted from `prove -v` output, not assumed, and
-they are the same six M1 probes as before: the icon test's own theme-premise
-guards did not fire on this host, so all three symbolic assertions executed.
+`make test-gtk4` on the real Wayland connection: **184** TAP results,
+comprising **178 executed assertions passed** and the same six pre-existing M1
+feasibility probes skipped, 0 failures. Per file: 18 binding (which is where
+all six skips live), 4 proof-of-life, 84 pane, 34 box, 44 icon. Do not restate
+this as 184 passing assertions. The six skips were counted from `prove -v`
+output run through a copy of the runner in a scratch directory, not assumed.
+
+`make test-gtk3`: 1 assertion passed on the real Wayland connection, and the
+same command passed identically against a pristine `git archive` of HEAD with
+byte-identical diagnostics. Both runs emit the pre-existing missing
+`Net::DBus::Annotation` for the MPRIS2 plugin, the disabled mpv backend, and
+one `gtk_widget_get_scale_factor` GTK critical, and both exit 0. `Net::DBus`
+itself is still not installed, so `perl -I. -c gmusicbrowser.pl` still fails at
+line 512 — on the committed file too, so that is not a regression.
+
+`gmusicbrowser_layout.pm` was not changed and still is not standalone
+compilable: `perl -c` fails on its `_"..."` gettext idiom for the committed
+file as well.
 
 Pane tests exercise both orientations, saved-size reconstruction, notification
 state before saving, focus/action signals, and real window resizing under all
@@ -228,15 +399,33 @@ four resize policies. Box tests exercise allocated offsets and widths for
 mixed, interleaved, and expand/fill rows in both axes. Physical pointer and
 keyboard input is not covered by either.
 
-GTK3 comparison: the unchanged production `BoxPack` was extracted from
-`gmusicbrowser_layout.pm` and driven by the same fixture, parser, width, child
-size request and text direction. GTK3 and GTK4 produced identical offsets and
-widths in all three rows; the table is in `TESTING.md`. That is a focused
-packing comparison, not a full GTK3 application regression pass. The GTK3
-startup/shutdown smoke that previously accompanied it does not actually pass
-on this host; see the corrections section above. No shared or GTK3 production
-code changed this session, and this session's change is confined to the GTK4
-renderer, so the GTK3 path cannot be affected by it.
+GTK3 regression status for this session: **shared code did change**, so the
+"cannot be affected" reasoning used by previous sessions does not apply here.
+`@Commands` in `gmusicbrowser_frontend_legacy.pm` is on the shared boundary,
+and widening it makes the bridge require `NextSong` and `PrevSong` at
+construction — so the failure mode is a GTK3 startup abort at
+`gmusicbrowser.pl:1866`. Two checks cover it:
+
+- `make test-gtk3` exercises the real GTK3 path on Wayland and passes
+  identically on the working tree and on pristine HEAD.
+- A scratch probe extracted the `%Command` table from the unmodified
+  `gmusicbrowser.pl` by regex, found 74 entries with all nine bridge names
+  present, constructed the bridge against it, dispatched `NextSong`,
+  `PrevSong`, and `Stop`, and confirmed `CloseWindow` and `SetFocusOn` stay
+  unregistered. It was not kept as a permanent test.
+
+What is still **not** covered on the GTK3 side: clicking the real GTK3 `Next`
+and `Prev` buttons, since they route through `Layout::Button`'s `activate`
+rather than the bridge, and any comparison of GTK3 and GTK4 button behaviour
+under the same fixture and action sequence. Neither widget was advanced past
+`GTK4 in progress`.
+
+The earlier packing comparison still stands: the unchanged production `BoxPack`
+was extracted from `gmusicbrowser_layout.pm` and driven by the same fixture,
+parser, width, child size request and text direction, and GTK3 and GTK4
+produced identical offsets and widths in all three rows; the table is in
+`TESTING.md`. That is a focused packing comparison, not a full GTK3
+application regression pass.
 
 `t/01_ModFileMetadata.t` still fails: it downloads media samples and the
 repository ships none. That is the pre-existing M0 gap, not a regression.
@@ -344,8 +533,13 @@ means the reported ~1190px window is not the layout's designed size.
 
 ## Suggested next steps
 
+0. **Highest-value cleanup, now overdue:** extract the `labels` hash into a
+   test fixture constant. It is duplicated at eleven test call sites plus
+   `gmusicbrowser_gtk4.pl`, and every future tooltip-bearing widget touches all
+   twelve. Deliberately not bundled with this increment.
 1. Keep running `make test-gtk4` on the real Wayland connection with the system
    packages, outside the execution sandbox when needed. Count explicit skips.
+   Also run `make test-gtk3` after any shared-code change; it works now.
 2. Write the `DECISIONS.md` entries for `AB` and `WB`. These are the oldest
    outstanding item and they block those two rows from ever reaching parity.
    **Still not done.** This session did the D006 note and the symbolic
@@ -358,6 +552,10 @@ means the reported ~1190px window is not the layout's designed size.
 4. Move D023 from Proposed to Accepted, or push back on it, before more
    icon-bearing widgets are added. D024 is now in the same position: both are
    Proposed and both concern icon resolution, so decide them together.
+   **New evidence for D024 this session:** `Next` and `Prev` are its first
+   production consumers. Adwaita carries `media-skip-forward` and
+   `media-skip-backward` only as `-symbolic`, so without the fallback both
+   would render as text on stock GNOME, a D022 target.
    Decide also whether to propose mapping `gmb-*` to freedesktop names, which
    D023 alternative 2 currently defers and which this session did not do.
 5. Investigate the queue clipping properly: make `QueueList` propagate a
@@ -442,6 +640,32 @@ means the reported ~1190px window is not the layout's designed size.
 - The offline renderer doubles have no GDK display at all, so anything the
   renderer newly reads from the icon theme must tolerate the lookup
   subroutine being absent rather than just returning nothing.
-- GTK3 with `-cmd` and no `Net::DBus` exits 2 at `gmusicbrowser.pl:512`, and
-  with `-nodbus` it hangs past `timeout` and must be `pkill`ed. Budget for
-  cleaning up stray `gmusicbrowser.pl` processes if you try either.
+- GTK3 with `-cmd` and no `Net::DBus` exits 2 at `gmusicbrowser.pl:512`. With
+  `-nodbus` it does not hang because the command was lost — it hangs because
+  `Quit` is not in the `%Command` fifo table, so `run_command` warns
+  `Unknown command 'Quit'` at line 1716 and the main loop continues. Use
+  `SIGTERM`, which `gmusicbrowser.pl:1938` wires to `Quit`, or just run
+  `make test-gtk3`. Either way gmusicbrowser outlives `timeout`, so budget for
+  cleaning up stray `gmusicbrowser.pl` processes; it also ignores a `SIGTERM`
+  sent before the main loop is reached, so a `SIGKILL` fallback is needed.
+- Do not isolate `XDG_RUNTIME_DIR` for a GTK3 run. `use Gtk3 '-init'` at
+  `gmusicbrowser.pl:26` initialises GDK at compile time, so a temporary runtime
+  directory with a symlinked Wayland socket yields `cannot open display` before
+  any application code runs. Isolate config, data, cache, and state only, and
+  add `-demo` so the run never writes tags or settings.
+- A fixture with several top-level containers gives the parser several roots,
+  and `Render` requires exactly one. Nest the extra containers by naming them
+  as children of the root, as `t/layouts/buttons.layout` does.
+- `Layout::Button` shows the widget-table `text` only when `with_text` is set
+  (`gmusicbrowser_layout.pm:3047`) or when there is no `stock` at all (3062).
+  For `Next` and `Prev`, which both have a `stock` default, `_"Next"` and
+  `_"Previous"` never reach the GTK3 UI. Do not treat a widget-table `text`
+  field as a visible label without checking that path.
+- Widget usage counts in `layouts/` need care and have been recorded wrong
+  three times. `grep -c` overcounts via `group=Next` and three
+  `titlebar.layout` `Name=` lines; a line-based grep undercounts because one
+  line often holds `Prev Stop Play Next`; and splitting each line on `=` misses
+  the continuation-line children in `contrib.layout` and
+  `makeitlooklike.layout`, which start with whitespace and carry no `=`. Verify
+  any figure against a hand-checked listing. The real instance counts are
+  **34** `Next`, **29** `Prev`, **20** `Stop`.

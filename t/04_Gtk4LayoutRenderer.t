@@ -138,7 +138,7 @@ $frontend=GMB::Frontend->new
 my $renderer=Layout::Renderer::Gtk4->new
 (	catalog=>$catalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
+	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
 	context=>{window_id=>'MainWindow',group=>'Play',selected_ids=>[]},
 );
 my $root=$renderer->Render('gtk4 proof');
@@ -171,7 +171,7 @@ is(scalar @{$ccatalog->{diagnostics}},0,'container fixture parses without diagno
 my $crenderer=Layout::Renderer::Gtk4->new
 (	catalog=>$ccatalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
+	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
 );
 my $paned=$crenderer->Render('gtk4 containers');
 
@@ -250,7 +250,7 @@ for my $case
 	$node->{children}[1]{packing}{raw}=$end;
 	my $prenderer=Layout::Renderer::Gtk4->new
 	(	catalog=>$pcatalog, frontend=>$frontend,
-		labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
+		labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
 	);
 	my $pane=$prenderer->Render('gtk4 containers');
 	$pane->allocate(600);
@@ -271,7 +271,7 @@ is(scalar @{$pkcatalog->{diagnostics}},0,'packing fixture parses without diagnos
 my $pkrenderer=Layout::Renderer::Gtk4->new
 (	catalog=>$pkcatalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
+	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
 );
 $pkrenderer->Render('gtk4 packing');
 
@@ -304,7 +304,7 @@ is(scalar @{$scatalog->{diagnostics}},0,'single-child fixture parses without dia
 my $srenderer=Layout::Renderer::Gtk4->new
 (	catalog=>$scatalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
+	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
 );
 $srenderer->Render('gtk4 single');
 
@@ -341,11 +341,13 @@ $srenderer->Destroy;
 my $buttons=File::Spec->catfile('t','layouts','buttons.layout');
 my $bcatalog=Layout::Parser::ParseFiles(files=>[$buttons]);
 is(scalar @{$bcatalog->{diagnostics}},0,'button fixture parses without diagnostics');
-my $stopped=0;
+my ($stopped,%dispatched)=(0);
 my $bfrontend;
 $bfrontend=GMB::Frontend->new
 (	commands =>
 	{	Stop => sub {$stopped++; return 1},
+		NextSong => sub {$dispatched{NextSong}++; return 1},
+		PrevSong => sub {$dispatched{PrevSong}++; return 1},
 		PlayPause => sub {1},
 		Quit => sub {1},
 	},
@@ -354,7 +356,7 @@ $bfrontend=GMB::Frontend->new
 my $brenderer=Layout::Renderer::Gtk4->new
 (	catalog=>$bcatalog,
 	frontend=>$bfrontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
+	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
 	context=>{window_id=>'MainWindow',group=>'Play',selected_ids=>[]},
 );
 $brenderer->Render('gtk4 buttons');
@@ -373,6 +375,39 @@ is($brenderer->Widget('Stop2')->{tooltip},'Custom tip','a layout tip overrides t
 # the authoritative icon option for Layout::Button is stock, not icon
 is($brenderer->Widget('Stop3')->{tooltip},'Stop','a layout stock option keeps the default tip');
 
+# Next and Prev each dispatch their own core command name. Their %Layout::Widgets
+# tips differ from their labels, so the tooltip is what pins the right entry.
+for my $case (['Next','Next Song','NextSong'],['Prev','Recently played songs','PrevSong'])
+{	my ($name,$tip,$command)=@$case;
+	my $button=$brenderer->Widget($name);
+	isa_ok($button,'Gtk4::Button');
+	is($button->{label},$tip,"$name falls back to its label when no icon resolves");
+	is($button->{tooltip},$tip,"$name applies the widget default tip as a tooltip");
+	$button->activate;
+	is($dispatched{$command},1,"$name dispatches $command");
+	$button->activate;
+	is($dispatched{$command},2,"$name is stateless and dispatches on every click");
+}
+# the two transport buttons must not share a command
+is($dispatched{NextSong},2,'Prev did not dispatch NextSong');
+
+# a repeated element keeps its own widget while sharing the element behaviour
+is($brenderer->Widget('Stop4')->{tooltip},'Stop','a suffixed Stop keeps the element default');
+is($brenderer->Widget('Next2')->{tooltip},'Skip','a suffixed Next honours its own layout tip');
+
+# Options the renderer does not implement stay in the catalog and are reported
+# rather than silently accepted. nbsongs and group only feed the click3 song
+# chooser; size and relief need the unimplemented Layout::Button defaults.
+is_deeply($brenderer->Unhandled('Prev2'),[qw/nbsongs group/],'Prev2 reports its unhandled options');
+is_deeply($brenderer->Unhandled('Next2'),[qw/size relief/],'Next2 reports its unhandled options in layout order');
+is($brenderer->Unhandled('Next'),undef,'a button with no options reports nothing unhandled');
+is($brenderer->Unhandled('Stop2'),undef,'a handled option is not reported as unhandled');
+my $b2=$bcatalog->{layouts}{'gtk4 buttons'};
+my ($prev2)=grep $_->{name} eq 'Prev2',map @{$_->{children}},@{$b2->{nodes}};
+is_deeply($prev2->{options}{values},{nbsongs=>'4',group=>'Recent'},'unhandled options are preserved in the parsed catalog');
+is($brenderer->Widget('Prev2')->{tooltip},'Recently played songs','an unhandled option does not disturb the default tip');
+
 $brenderer->Destroy;
+is_deeply($brenderer->Unhandled,{},'teardown clears the unhandled report');
 
 done_testing;

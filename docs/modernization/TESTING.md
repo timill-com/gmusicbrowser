@@ -10,7 +10,8 @@ make test-modernization
 
 This runs the neutral layout parser, frontend contract and lifecycle, legacy
 adapter and lifecycle integration, and GTK4 renderer contract tests. On
-2026-09-07 it reported 269 executed assertions passed and no skips. The
+2026-09-07, after the `Next`/`Prev` increment, it reported 298 executed
+assertions passed and no skips, up from 269 before it. The
 renderer test uses small in-process GTK doubles; it proves the
 parser/renderer/command wiring without claiming that a real GTK4 binding or
 display passed.
@@ -68,9 +69,13 @@ The action test uses [cycle-handle-focus](https://docs.gtk.org/gtk4/signal.Paned
 before [move-handle](https://docs.gtk.org/gtk4/signal.Paned.move-handle.html).
 
 `t/gtk4/30_Box.t` adds real `HB`/`VB` packing geometry to the runner. On
-2026-09-07 the full `make test-gtk4` run reported 173 TAP results: 167 executed
-assertions passed and the same six feasibility probes were skipped. The box file
-contributes 34 executed assertions and the icon file 33. They read allocated child offsets with
+2026-09-07, after the `Next`/`Prev` increment, the full `make test-gtk4` run
+reported 184 TAP results: 178 executed assertions passed and the same six
+feasibility probes were skipped, 0 failures. The skips were counted from
+`prove -v` and are the same six M1 probes as before. Before the increment the
+same command reported 173 results, comprising 167 executed assertions and those
+six skips. The box file contributes 34 executed assertions and the icon file 44.
+They read allocated child offsets with
 [translate_coordinates](https://docs.gtk.org/gtk4/method.Widget.translate_coordinates.html);
 `compute_bounds` and `compute_point` are unusable through this binding, which
 reports `GType GrapheneRect ... is not registered with gperl`. That is a
@@ -201,44 +206,108 @@ to 150 saved `150-449`. Increasing the maximum to 699 produced positions 250,
 translation; different fixtures and window geometry mean they are not a
 GTK3/GTK4 parity comparison. The temporary script is not a permanent test.
 
-The GTK3 entry point also completed an isolated Wayland startup and orderly
-shutdown smoke. That run reported an unavailable optional MPRIS2 dependency,
-an inactive mpv backend, and one GTK widget assertion; it is not yet a clean
-GTK3 acceptance result.
+## GTK3 regression smoke
 
-Correction recorded on 2026-09-07: an earlier revision of this file stated that
-`perl gmusicbrowser.pl -layout "with playlist" -cmd Quit` with temporary XDG
-directories "wrote its configuration and exited zero". It does not on this
-host. It exits **2**, because `Net::DBus` is not installed: `gmusicbrowser.pl`
-warns that `gmusicbrowser_dbus.pm` failed to load and then calls
-`GMB::DBus::simple_call` at `gmusicbrowser.pl:512` regardless, which is an
-undefined subroutine. The earlier "exited zero" reading was probably the exit
-status of a `tail` at the end of a pipeline rather than of perl.
+```sh
+make test-gtk3
+```
 
-This is pre-existing and unrelated to the GTK4 work: a pristine `git archive`
-of HEAD fails identically with the same error and the same exit status. It is
-only reached when `-cmd` is passed without `-nodbus`. Passing `-nodbus`
-instead does not give a usable smoke either: the command is not delivered, the
-window stays open, and the process outlives `timeout`, so it has to be killed.
-Until `Net::DBus` is available or that code path is fixed, there is no
-scripted GTK3 startup/shutdown smoke on this host. Do not cite one as passing.
+`tools/run-gtk3-smoke` starts the unchanged GTK3 entry point on the real
+Wayland connection with isolated `XDG_CONFIG_HOME`, `XDG_DATA_HOME`,
+`XDG_CACHE_HOME`, and `XDG_STATE_HOME`, waits for it to reach the main loop,
+shuts it down with `SIGTERM`, and reports one TAP assertion on the exit status.
+It exits 77 with a reason when there is no Wayland socket or no `Gtk3`. It runs
+with `-nodbus -noscan -nocheck -demo`, and `-demo` means it never writes tags
+or settings.
+
+The real `XDG_RUNTIME_DIR` is kept rather than replaced with a symlink farm.
+`use Gtk3 '-init'` at `gmusicbrowser.pl:26` initialises GDK at compile time, so
+the Wayland socket must already be reachable under its own name; pointing
+`XDG_RUNTIME_DIR` at a temporary directory produced `cannot open display`
+before any application code ran.
+
+Shutdown must go through `SIGTERM`, which `gmusicbrowser.pl:1938` wires to
+`Quit` immediately before `Gtk3->main`. On 2026-09-07 this passed on both the
+working tree and a pristine `git archive` of HEAD, with byte-identical
+diagnostics on each: the optional MPRIS2 plugin fails to load because
+`Net::DBus::Annotation` is missing, the mpv backend reports itself disabled, one
+`gtk_widget_get_scale_factor: assertion 'GTK_IS_WIDGET (widget)' failed`
+critical is emitted, and perl exits 0. Those warnings are pre-existing, so this
+is a startup/shutdown regression check rather than a clean GTK3 acceptance
+result.
+
+Corrections recorded on 2026-09-07, replacing two earlier readings:
+
+- An earlier revision stated that `perl gmusicbrowser.pl -layout "with
+  playlist" -cmd Quit` with temporary XDG directories "wrote its configuration
+  and exited zero". It does not on this host: it exits **2**, because
+  `Net::DBus` is not installed, so `gmusicbrowser.pl` warns that
+  `gmusicbrowser_dbus.pm` failed to load and then calls the undefined
+  `GMB::DBus::simple_call` at `gmusicbrowser.pl:512` anyway. A pristine
+  `git archive` of HEAD fails identically, so it is pre-existing. The earlier
+  "exited zero" reading was probably a `tail`'s exit status at the end of a
+  pipeline. `perl -I. -c gmusicbrowser.pl` fails at the same line for the same
+  reason, on the committed file too.
+- A later revision concluded from this that "there is currently no scripted
+  GTK3 startup/shutdown smoke on this host" and that with `-nodbus` "the
+  command is not delivered". Both are wrong, and the second was a misdiagnosis.
+  `-nodbus` *does* deliver the command: `gmusicbrowser.pl:1937` calls
+  `run_command(undef,'Quit')`. The problem is that `Quit` is not in the
+  `%Command` fifo table at all — it is a frontend lifecycle operation — so
+  `run_command` warns `Unknown command 'Quit'` at line 1716 and the application
+  keeps running until it is killed. Using `SIGTERM` instead makes a scripted
+  smoke work, which is what `tools/run-gtk3-smoke` does. Budget for `pkill`ing
+  a stray `gmusicbrowser.pl` if a `-cmd Quit` route is attempted again;
+  gmusicbrowser also outlives `timeout`, so an outer hard kill is needed.
+
+The GTK3 side of this increment: `@Commands` in
+`gmusicbrowser_frontend_legacy.pm` is shared code, and widening it makes the
+bridge require `NextSong` and `PrevSong` at construction. The failure mode is
+therefore a GTK3 startup abort at `gmusicbrowser.pl:1866`. Two checks cover it.
+`make test-gtk3` exercises the real path and passes identically on the working
+tree and on pristine HEAD. Separately, a scratch probe extracted the `%Command`
+table from the unmodified `gmusicbrowser.pl` by regex, found 74 entries with all
+nine bridge names present, constructed the bridge against it, dispatched
+`NextSong`, `PrevSong`, and `Stop`, and confirmed `CloseWindow` and
+`SetFocusOn` stay unregistered. That probe was not kept as a permanent test.
 
 `perl -c gmusicbrowser_layout.pm` fails on the `_"..."`
 gettext idiom for the committed file as well; that module is not standalone
 compilable and the failure is not a regression.
 
-The `Stop` widget increment is covered on both sides. `t/layouts/buttons.layout`
-is the fixture. Offline in `t/04_Gtk4LayoutRenderer.t` there is no icon theme
-behind the doubles, so every icon resolves to nothing and the assertions cover
-the text fallback, the default tooltip, a layout `tip=` override, and repeated
-stateless dispatch. On real Wayland in `t/gtk4/40_Icons.t` the same fixture
-resolves `media-playback-stop` from the host theme, carries no text label, keeps
-its tooltip, honours a layout `stock=` override, and dispatches `Stop` when
-`clicked` is emitted.
+The `%Buttons` widgets are covered on both sides. `t/layouts/buttons.layout` is
+the fixture; it now carries `Prev`, `Stop`, `Stop4`, and `Next` plus a
+`Prev2(nbsongs=4,group=Recent)` and `Next2(size=menu,relief=normal,tip="Skip")`
+that exercise the unhandled-option path. It has one root container, because the
+renderer requires exactly one and three top-level containers would be three
+roots.
 
-Both are behaviour, not construction: run against HEAD before the increment,
-each file dies with `GTK4 widget 'Stop' is not implemented`, so neither can pass
-against the previous renderer.
+Offline in `t/04_Gtk4LayoutRenderer.t` there is no icon theme behind the
+doubles, so every icon resolves to nothing and the assertions cover the text
+fallback, the default tooltip, a layout `tip=` override, per-widget command
+routing, repeated stateless dispatch, and the `Unhandled` report. On real
+Wayland in `t/gtk4/40_Icons.t` the same fixture resolves icons from the active
+theme, carries no text label, keeps its tooltips, honours a layout `stock=`
+override, reports its ignored options, and dispatches `Stop`, `NextSong`, and
+`PrevSong` when `clicked` is emitted.
+
+Both are behaviour, not construction. Run against `git archive` of the
+preceding commit, with only the test files and the fixture overlaid on the
+pristine tree, `t/04_Gtk4LayoutRenderer.t` and `t/gtk4/40_Icons.t` both die at
+`t/layouts/buttons.layout:4: GTK4 widget 'Prev' is not implemented`, and
+`t/05_FrontendLegacy.t` fails 7 of 47 assertions because the pristine bridge
+does not require `NextSong` or `PrevSong`. `t/06_LifecycleLegacy.t` still
+passes there: the two added names ride along in its command fixture and its
+role is startup/shutdown ordering, not the command allowlist.
+
+`Next` and `Prev` are the first production consumers of the D024 symbolic
+fallback. Measured in the runner environment, Adwaita carries
+`media-skip-forward` and `media-skip-backward` **only** as `-symbolic`, so both
+buttons resolve to `media-skip-forward-symbolic` and
+`media-skip-backward-symbolic`, while `Stop` still resolves the unsuffixed
+`media-playback-stop`. Without D024 these two widgets would have fallen back to
+a text label on stock GNOME. The assertions accept either spelling so they do
+not pin one theme's convention.
 
 `Gtk4::Button->activate` does not work for this: it needs a mapped, focusable
 widget and left the command undispatched. Emitting `clicked` is the signal a

@@ -12,7 +12,10 @@ package GMB::Frontend::Legacy;
 
 use gmusicbrowser_frontend;
 
-my @Commands=qw/Play PlayPause Pause Stop IncVolume DecVolume TogMute/;
+# Every name here must exist in the core %Command table; the widget-dependent
+# and lifecycle commands deliberately stay out so a frontend cannot reach a
+# command that needs a GTK3 widget argument.
+my @Commands=qw/Play PlayPause Pause Stop NextSong PrevSong IncVolume DecVolume TogMute/;
 my @Events=qw/Playing CurSong Time Vol Quit/;
 my %OpenCommands=
 ( playlist	=> 'OpenFiles',

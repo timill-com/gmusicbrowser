@@ -72,7 +72,8 @@ $app->signal_connect(activate => sub
 	$renderer=Layout::Renderer::Gtk4->new
 	(	catalog=>$catalog,
 		frontend=>$frontend,
-		labels=>{play=>_"Play",pause=>_"Pause",quit=>_"Quit",stop=>_"Stop"},
+		labels=>{play=>_"Play",pause=>_"Pause",quit=>_"Quit",stop=>_"Stop",
+			next=>_"Next Song",prev=>_"Recently played songs"},
 		context=>{window_id=>'MainWindow',group=>'Play',selected_ids=>[]},
 	);
 	my $content=$renderer->Render('gtk4 proof');

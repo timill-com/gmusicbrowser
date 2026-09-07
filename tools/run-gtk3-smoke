@@ -1,0 +1,99 @@
+#!/bin/sh
+
+# Copyright (C) 2026 gmusicbrowser contributors
+#
+# This file is part of Gmusicbrowser.
+# Gmusicbrowser is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License version 3, as
+# published by the Free Software Foundation
+
+# Unchanged-GTK3 startup and orderly shutdown, for the regression pass AGENTS.md
+# requires after a shared-code change. Shutdown goes through SIGTERM, which
+# gmusicbrowser.pl wires to Quit just before Gtk3->main. '-cmd Quit' cannot be
+# used: Quit is a lifecycle operation and is not in the %Command fifo table, so
+# run_command warns and the application keeps running.
+
+set -u
+
+gmb_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+gmb_wayland_display=${WAYLAND_DISPLAY:-}
+gmb_host_runtime=${XDG_RUNTIME_DIR:-}
+
+if test -z "$gmb_host_runtime" || test -z "$gmb_wayland_display" ||
+	! test -S "$gmb_host_runtime/$gmb_wayland_display"
+then
+	echo "GTK3 smoke skipped: no real Wayland connection is available" >&2
+	exit 77
+fi
+if ! perl -e 'require Gtk3' 2>/dev/null
+then
+	echo "GTK3 smoke skipped: Gtk3 is not installed" >&2
+	exit 77
+fi
+
+gmb_smoke_dir=$(mktemp -d "${TMPDIR:-/tmp}/gmusicbrowser-gtk3-smoke.XXXXXX")
+gmb_pid=
+gmb_cleanup()
+{	test -n "$gmb_pid" && kill -KILL "$gmb_pid" 2>/dev/null
+	rm -rf "$gmb_smoke_dir"
+}
+trap gmb_cleanup EXIT HUP INT TERM
+
+mkdir -p "$gmb_smoke_dir/config" "$gmb_smoke_dir/data" \
+	"$gmb_smoke_dir/cache" "$gmb_smoke_dir/state"
+
+# The real XDG_RUNTIME_DIR is kept: 'use Gtk3 -init' runs at compile time, so
+# the Wayland socket must already be reachable under its own name. Config, data,
+# cache, and state are isolated so the user profile is never touched.
+cd "$gmb_root"
+env -u DBUS_SESSION_BUS_ADDRESS -u PERL5LIB -u PERL5OPT \
+	XDG_CONFIG_HOME="$gmb_smoke_dir/config" \
+	XDG_DATA_HOME="$gmb_smoke_dir/data" \
+	XDG_CACHE_HOME="$gmb_smoke_dir/cache" \
+	XDG_STATE_HOME="$gmb_smoke_dir/state" \
+	GDK_BACKEND=wayland \
+	perl -I. gmusicbrowser.pl -nodbus -noscan -nocheck -demo \
+	>"$gmb_smoke_dir/log" 2>&1 &
+gmb_pid=$!
+
+gmb_wait=0
+while test "$gmb_wait" -lt 60
+do
+	kill -0 "$gmb_pid" 2>/dev/null || break
+	test -s "$gmb_smoke_dir/log" && break
+	gmb_wait=$((gmb_wait+1)); sleep 0.5
+done
+sleep 3
+
+if ! kill -0 "$gmb_pid" 2>/dev/null
+then
+	wait "$gmb_pid"; gmb_status=$?
+	echo "GTK3 smoke failed: exited during startup with status $gmb_status" >&2
+	cat "$gmb_smoke_dir/log" >&2
+	gmb_pid=
+	exit 1
+fi
+
+kill -TERM "$gmb_pid"
+gmb_wait=0
+while test "$gmb_wait" -lt 60 && kill -0 "$gmb_pid" 2>/dev/null
+do
+	gmb_wait=$((gmb_wait+1)); sleep 0.5
+done
+if kill -0 "$gmb_pid" 2>/dev/null
+then
+	echo "GTK3 smoke failed: did not shut down on SIGTERM" >&2
+	cat "$gmb_smoke_dir/log" >&2
+	exit 1
+fi
+wait "$gmb_pid"; gmb_status=$?
+gmb_pid=
+
+echo "1..1"
+if test "$gmb_status" -eq 0
+then echo "ok 1 - GTK3 starts on Wayland and shuts down on SIGTERM"
+else echo "not ok 1 - GTK3 exited with status $gmb_status on shutdown"
+fi
+echo "# warnings and diagnostics from the run:" >&2
+cat "$gmb_smoke_dir/log" >&2
+test "$gmb_status" -eq 0

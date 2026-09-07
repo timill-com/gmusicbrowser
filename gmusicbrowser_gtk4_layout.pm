@@ -42,12 +42,31 @@ my %StockNames=
 # pointer input is not ported. 'tip' names a caller-supplied label rather than
 # holding text, which keeps this module free of the _"..." gettext idiom.
 my %Buttons=
-(	Stop =>
+(	Prev =>
+	{	stock	=> 'gtk-media-previous',
+		tip	=> 'prev',
+		command	=> 'PrevSong',
+	},
+	Stop =>
 	{	stock	=> 'gtk-media-stop',
 		tip	=> 'stop',
 		command	=> 'Stop',
 	},
+	Next =>
+	{	stock	=> 'gtk-media-next',
+		tip	=> 'next',
+		command	=> 'NextSong',
+	},
 );
+
+# The only options a %Buttons widget acts on. Everything else a layout supplies
+# stays in the parsed catalog so a saved layout round trips (D002), and
+# Unhandled reports it so an ignored option is recorded rather than silently
+# accepted. What that currently covers: 'nbsongs' and 'group', which only feed
+# the Prev/Next click3 song chooser; 'size' and 'relief', which need the legacy
+# Layout::Button defaults; and 'button=0', which asks for the EventBox form
+# instead of a real button.
+my %ButtonHandled= map {$_=>1} qw/icon stock text tip/;
 
 # the bundled aliases that have no file of their own, from %IconsFallbacks in
 # gmusicbrowser.pl
@@ -85,6 +104,7 @@ sub new
 	  context	=> $context,
 	  icon_path	=> $icon_path,
 	  widgets	=> {},
+	  unhandled	=> {},
 	  subscriptions=> [],
 	},$class;
 }
@@ -105,6 +125,13 @@ sub Widget
 {	return $_[0]{widgets}{$_[1]};
 }
 
+# Options the renderer read from the layout but does not implement, by widget
+# name. A caller can report them; the parsed values themselves are untouched.
+sub Unhandled
+{	my ($self,$name)=@_;
+	return defined $name ? $self->{unhandled}{$name} : $self->{unhandled};
+}
+
 sub Destroy
 {	my $self=shift;
 	$self->{frontend}->Unsubscribe($_) for @{$self->{subscriptions}};
@@ -115,6 +142,7 @@ sub Destroy
 		Glib::Source->remove(delete $widget->{paned_idle}) if $widget->{paned_idle};
 	}
 	$self->{widgets}={};
+	$self->{unhandled}={};
 }
 
 sub _CreateContainer
@@ -412,6 +440,8 @@ sub _CreateWidget
 sub _CreateButton
 {	my ($self,$node,$def)=@_;
 	my $values=$node->{options}{values};
+	my @ignored=grep !$ButtonHandled{$_},@{$node->{options}{order}};
+	$self->{unhandled}{$node->{name}}=\@ignored if @ignored;
 	my $widget=Gtk4::Button->new;
 	# the layout's own icon= or stock= wins over the widget's default, matching
 	# how %$opt overrides @default_options in legacy Layout::Button

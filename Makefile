@@ -31,6 +31,9 @@ test-modernization:
 test-gtk4:
 	sh tools/run-gtk4-smoke
 
+test-gtk3:
+	sh tools/run-gtk3-smoke
+
 clean:
 	rm -rf dist/
 distclean: clean

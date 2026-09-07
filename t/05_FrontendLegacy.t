@@ -39,7 +39,7 @@ sub HasChanged
 }
 
 my (@commands,@opens);
-my @allowed=qw/Play PlayPause Pause Stop IncVolume DecVolume TogMute/;
+my @allowed=qw/Play PlayPause Pause Stop NextSong PrevSong IncVolume DecVolume TogMute/;
 our %Command=
 (	(map
 	{	my $name=$_;
@@ -51,6 +51,7 @@ our %Command=
 	} qw/OpenFiles EnqueueFiles AddFilesToPlaylist InsertFilesInPlaylist AddToLibrary/),
 	Quit => [sub { die "Quit command used\n" },'Quit'],
 	CloseWindow => [sub { die "widget-dependent command used\n" },'Close Window'],
+	NextSongInPlaylist => [sub { die "unlisted core command used\n" },'Next Song In Playlist'],
 );
 my %state=
 (	Playing => 0,
@@ -75,6 +76,30 @@ is_deeply(\@commands,[map {[$_,undef,'legacy argument']} @allowed],'allowlisted 
 is($frontend->Dispatch('Quit',undef,{})->{error},"Unknown command 'Quit'",'Quit is not registered as a legacy core command');
 is($frontend->Dispatch('playpause',undef,{})->{error},"Unknown command 'playpause'",'command spelling remains case-sensitive');
 is($frontend->Dispatch('CloseWindow',undef,{})->{error},"Unknown command 'CloseWindow'",'widget-dependent command is not registered');
+
+# NextSong and PrevSong are the transport commands the Next and Prev widgets
+# dispatch. A missing definition must abort construction rather than leave a
+# widget wired to a command that fails on click, so this is what proves the
+# bridge requires them rather than merely tolerating them.
+for my $missing (qw/NextSong PrevSong Stop/)
+{	my %partial=map {$_=>$Command{$_}} grep $_ ne $missing,keys %Command;
+	my $ok=eval
+	{	GMB::Frontend::Legacy->new
+		(	frontend => GMB::Frontend->new,
+			commands => \%partial,
+			watch => \&Watch,
+			unwatch => \&UnWatch,
+			state => {map {my $name=$_; $name=>sub {$state{$name}}} keys %state},
+		);
+		1;
+	};
+	is($@,"Missing legacy command '$missing'\n","the bridge requires $missing");
+	ok(!$ok,"a bridge missing $missing does not construct");
+}
+# a core command outside the bridge's list stays unreachable, so widening the
+# list is a deliberate act rather than a side effect of the core table
+is($frontend->Dispatch('NextSongInPlaylist',undef,{})->{error},
+	"Unknown command 'NextSongInPlaylist'",'an unlisted core command is not registered');
 
 my @open_cases=
 (	[playlist	=> 'OpenFiles'],

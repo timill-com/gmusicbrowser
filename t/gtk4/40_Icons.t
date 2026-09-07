@@ -44,7 +44,7 @@ $frontend=GMB::Frontend->new
 my $renderer=Layout::Renderer::Gtk4->new
 (	catalog=>$catalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
+	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
 	icon_path=>'pix',
 );
 $renderer->Render('gtk4 icons');
@@ -115,7 +115,7 @@ for my $name (qw/Play Play2 Quit2/)
 	my $probe=Layout::Renderer::Gtk4->new
 	(	catalog=>$catalog,
 		frontend=>$frontend,
-		labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
+		labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
 		icon_path=>'pix',
 	);
 	$probe->{icon_theme}=$adwaita;
@@ -164,17 +164,20 @@ $renderer->Destroy;
 {	my $bfixture=File::Spec->catfile('t','layouts','buttons.layout');
 	my $bcatalog=Layout::Parser::ParseFiles(files=>[$bfixture]);
 	is(scalar @{$bcatalog->{diagnostics}},0,'button fixture parses without diagnostics');
-	my $stopped=0;
+	my ($stopped,%dispatched)=(0);
 	my $bfrontend;
 	$bfrontend=GMB::Frontend->new
 	(	commands=>
-		{ Stop=>sub {$stopped++; return 1}, PlayPause=>sub {1}, Quit=>sub {1} },
+		{ Stop=>sub {$stopped++; return 1},
+		  NextSong=>sub {$dispatched{NextSong}++; return 1},
+		  PrevSong=>sub {$dispatched{PrevSong}++; return 1},
+		  PlayPause=>sub {1}, Quit=>sub {1} },
 		state=>{Playing=>sub {0}},
 	);
 	my $brenderer=Layout::Renderer::Gtk4->new
 	(	catalog=>$bcatalog,
 		frontend=>$bfrontend,
-		labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
+		labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
 		icon_path=>'pix',
 	);
 	$brenderer->Render('gtk4 buttons');
@@ -193,6 +196,30 @@ $renderer->Destroy;
 	# same route a real click takes and is what 20_Paned.t uses for actions.
 	$stop->signal_emit('clicked');
 	is($stopped,1,'a real GTK4 button dispatches Stop when clicked');
+
+	# Next and Prev resolve their own default stock. Adwaita, which the runner
+	# falls back to because it isolates the session bus, ships these two only as
+	# '-symbolic', so this is also the D024 fallback acting on a real widget.
+	for my $case
+	(	['Next','NextSong','media-skip-forward','Next Song'],
+		['Prev','PrevSong','media-skip-backward','Recently played songs'],
+	)
+	{	my ($name,$command,$icon,$tip)=@$case;
+		my $button=$brenderer->Widget($name);
+		like($button->get_icon_name,qr/^\Q$icon\E(?:-symbolic)?$/,
+			"$name resolves its default stock through the icon theme");
+		is($button->get_label,undef,"an icon $name button carries no text label");
+		is($button->get_tooltip_text,$tip,"$name keeps its tooltip alongside the icon");
+		$button->signal_emit('clicked');
+		is($dispatched{$command},1,"a real GTK4 button dispatches $command when clicked");
+	}
+	is($dispatched{NextSong},1,'clicking Prev did not dispatch NextSong');
+
+	# an option the renderer does not implement is reported, not applied
+	is_deeply($brenderer->Unhandled('Next2'),[qw/size relief/],
+		'a real widget reports the options it ignored');
+	is($brenderer->Widget('Next2')->get_tooltip_text,'Skip',
+		'a layout tip still overrides the default beside unhandled options');
 	$brenderer->Destroy;
 }
 

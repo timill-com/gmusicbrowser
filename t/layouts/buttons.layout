@@ -1,3 +1,5 @@
 [gtk4 buttons]
 Type=G
-VBroot= Stop Stop2(tip="Custom tip") Stop3(stock=gmb-random) Play Quit
+VBroot= Stop Stop2(tip="Custom tip") Stop3(stock=gmb-random) Play Quit VBtransport VBoptions
+VBtransport= Prev Stop4 Next
+VBoptions= Prev2(nbsongs=4,group=Recent) Next2(size=menu,relief=normal,tip="Skip")

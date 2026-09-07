@@ -58,7 +58,7 @@ my @children=('Label','Text','Text2',map {"Label$_"} 2..11);
 my $renderer=Layout::Renderer::Gtk4->new
 (	catalog=>$catalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
+	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop',next=>'Next Song',prev=>'Recently played songs'},
 );
 my $root=$renderer->Render('gtk4 packing');
 $root->set_direction('ltr');

@@ -562,6 +562,18 @@ assertions fail, returning `application-exit` and `view-refresh`. Revisit if a
 supported theme is found where the suffixed name is worse than the unsuffixed
 one.
 
+Production evidence added on 2026-09-07, when the `Next` and `Prev` widgets
+were rendered: they are the first widgets in the port that actually depend on
+this fallback. Their defaults are `gtk-media-next` and `gtk-media-previous`,
+which `%StockNames` maps to `media-skip-forward` and `media-skip-backward`, and
+Adwaita carries neither unsuffixed. Measured in the runner environment, both
+resolve to the `-symbolic` spelling while `Stop` still resolves the unsuffixed
+`media-playback-stop`, confirming that the unsuffixed pass keeps priority where
+the artwork exists. Without this decision the two most-used unported buttons in
+the bundled layouts — 34 and 29 instances — would render as text labels on
+stock GNOME, which D022 makes a required target. The Wayland assertions accept
+either spelling so they do not pin one theme's convention.
+
 ## Decision template
 
 Copy this section for new decisions:

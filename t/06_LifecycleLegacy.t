@@ -36,7 +36,7 @@ sub HasChanged
 }
 
 my @order;
-my @allowed=qw/Play PlayPause Pause Stop IncVolume DecVolume TogMute/;
+my @allowed=qw/Play PlayPause Pause Stop NextSong PrevSong IncVolume DecVolume TogMute/;
 my %commands=
 (	(map {my $name=$_; $name=>[sub {return $name},$name]} @allowed),
 	OpenFiles => [sub {push @order,'command:OpenFiles:'.($_[1] || ''); return 'opened'},'Open files'],
