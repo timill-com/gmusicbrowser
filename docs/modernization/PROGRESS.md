@@ -231,6 +231,20 @@ the table; each has been wrong at least once when taken on trust.
 	make test-gtk3
 	git rev-list --count master..HEAD
 
+## The GTK3 reference count, and its basis
+
+`MODERNIZATION.md` records **1444 `Gtk3::` references across 27 files**. That
+reproduces exactly, but only on one basis, and the basis was never written down:
+
+	# 1444 across 27 files - production only
+	for f in $(git ls-files '*.pm' '*.pl' | grep -v '^t/' | grep -v gmusicbrowser_gtk4); do
+	  grep -o 'Gtk3::' "$f"; done | wc -l
+
+A plain `grep -roh 'Gtk3::' --include=*.pm --include=*.pl . | wc -l` gives
+**1448**, because it also counts four references in `t/gtk4/` fixtures and the
+GTK4 renderer's comments naming the GTK3 source of truth. Neither figure is
+wrong; they answer different questions. State which one you mean.
+
 ## Counting
 
 Instance counts have been recorded wrong repeatedly, so state the basis:
