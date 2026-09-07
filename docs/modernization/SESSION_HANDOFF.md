@@ -26,6 +26,90 @@ Last session: 2026-09-07. Branch `gtk4-alpha`.
 Read `MODERNIZATION.md` and `AGENTS.md` first. This file only records where the
 previous session stopped and what the next one should verify before continuing.
 
+## Standing policy: the GTK4-native mechanism first — now D029
+
+The user set this as a standing policy at the end of the 2026-09-07 session.
+It is recorded as **D029, Accepted**; read the entry, not just this summary.
+
+> Basically I would rather simplify and implement things the GTK4 native way
+> than trying to port the exact GTK3 thing.
+
+and, on whether a not-yet-ported option should make the renderer refuse:
+
+> we should try to find equivalent in this case in GTK4, if none exists, we
+> must implement
+
+The operative rule is **find the GTK4 equivalent; if none exists, build it.**
+Nothing is deliberately dropped. Three things bound it, and each has bitten
+already:
+
+- **It does not override D002 or D013.** That was the point of the two
+  clarifying rounds. Native is about the toolkit call underneath, not the
+  layout language, and not licence to restyle.
+- **"We must implement" cannot mean a custom widget.** A `Gtk4::Widget`
+  subclass registers and instantiates, but its layout vfunc overrides are
+  **silently ignored** (see below and D006). Native therefore means composing
+  GTK4's existing layout managers.
+- **Do not read it as "refuse every layout using an unported option."**
+  `markup=` alone has 76 uses; that reading would take the renderer from
+  rendering 8 widget types to refusing nearly every real layout. The
+  `Unhandled` accessor stays the mechanism for a not-yet-ported option.
+
+## New D006 evidence from this session's probes
+
+All measured on the real Wayland connection (display
+`Glib::Object::_Unregistered::GdkWaylandDisplay`, `wayland=1`), under
+`LC_ALL=C` for the numeric tables. Full detail is in D006; the headlines:
+
+- **`Glib::Type->register_object('Gtk4::Widget','My::Class')` works.** The
+  class registers, instantiates, and passes `->isa('Gtk4::Widget')`.
+- **Layout vfunc overrides are silently ignored — the decisive finding.**
+  `MEASURE`, `SIZE_ALLOCATE`, `do_measure`, and `do_size_allocate` were all
+  defined on one subclass and **none** was called during real layout;
+  `measure('horizontal',-1)` read back `0,0,-1,-1` and the widget was
+  allocated height 0 against an override claiming 40. No warning. So D025
+  alternative 1 is **impossible**, not deferred.
+  *Method warning:* a lowercase `measure` sub does get called, but only
+  because it shadows the introspected method when Perl calls
+  `$widget->measure(...)` itself. That is not GTK invoking a vfunc, and
+  counting it overstates what the binding supports. Probe with the
+  uppercase/`do_` names and judge by GTK's own layout pass.
+- **`Gtk4::ConstraintLayout` reproduces `GtkAlignment` exactly.** Measured
+  against `Gtk3::Alignment` on the same fixture and slot: 14 of 15
+  fractional `xalign`/`xscale` combinations identical, one off by 1px from
+  solver rounding. The table is in D025. This is what makes the `AB`
+  fractional gap closable.
+- **`Glib::Type->from_package` does not exist** on this binding — the call
+  dies. An earlier note recorded it as *reporting classes absent*, which
+  implied it worked and answered wrongly. Probe by constructing inside
+  `eval`, never by type lookup.
+- **`backend_probe` never sets an `ok` key** — check `->{error}`. Checking
+  `->{ok}` reports failure against a good display.
+- **`Gtk4::Constraint` strength must be numeric.** `'required'` warns
+  `isn't numeric` and coerces to strength **0**, so the constraint constructs
+  but does not bind. Required is `1001001000`.
+- **A widget's own CSS padding falsifies a geometry probe.** A `Gtk4::Button`
+  asked for `set_size_request(40,24)` measures 26px wide at a 7px inset; a
+  `Gtk4::Label` measures exactly 40 at 0. A *uniform* offset across every row
+  of a geometry table is the signature of this, not of a layout bug.
+
+### Two corrections to claims inherited from last session
+
+Both were recorded in good faith and neither reproduces as stated. The method
+that produced each bad reading matters more than the correction:
+
+- **"`Glib::Type->from_package` reports lazily-registered classes as absent,
+  and probing by construction reverses the result."** The construction results
+  are right, but the explanation is not: `from_package` is not a method on this
+  binding at all, so it never reported anything. There is no evidence here for
+  lazy registration. The bad reading came from assuming a died call had
+  returned a falsy answer.
+- **"`measure`/`do_measure` were among five vfunc names tried and none was
+  called."** The conclusion holds, but `measure` *was* called in that probe —
+  by the probe's own `$widget->measure(...)` call, which a lowercase sub
+  shadows. Mixing a shadowing method name into the vfunc list makes the
+  evidence read as stronger and broader than it is.
+
 ## Read this before picking ToggleButton
 
 The previous handoff recommended `ToggleButton` next, on the grounds that it is
@@ -1074,12 +1158,15 @@ means the reported ~1190px window is not the layout's designed size.
 3. Keep running `make test-gtk4` on the real Wayland connection with the system
    packages, outside the execution sandbox when needed. Count explicit skips.
    Also run `make test-gtk3` after any shared-code change; it works now.
-4. `AB` and `WB`. D025 and D026 are **Accepted**, but as documented
-   approximations, so the real work is unchanged and still open: close D025's
-   fractional alignment/scale gap (its alternative 1, a custom widget with
-   `measure`/`size_allocate` vfunc overrides, which D006 has not established),
-   or get it explicitly waived. D026 alternative 2 — folding `hover_layout`
-   into `WB` — is still undecided and still needs a popup-window design.
+4. `AB` and `WB`. D025 and D026 are **Accepted** as documented
+   approximations. D025's fractional alignment/scale gap is now **closable
+   and being closed**: its alternative 1 (a custom widget with
+   `measure`/`size_allocate` vfunc overrides) is not merely unestablished but
+   **impossible through this binding** — the overrides are silently ignored,
+   see D006 — while `Gtk4::ConstraintLayout` was measured to reproduce
+   `GtkAlignment` exactly and is the replacement route, recorded as D025
+   alternative 4. D026 alternative 2 — folding `hover_layout` into `WB` — is
+   still undecided and still needs a popup-window design.
 5. D006 binding evidence. **Already recorded, keep extending it.** D006 now
    holds the graphene marshalling failure, the `->can` segfault, the
    widget-before-`Gtk4::init` segfault, the empty-string boolean artifact, the

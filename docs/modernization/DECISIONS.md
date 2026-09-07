@@ -172,6 +172,63 @@ Evidence recorded so far, against the system
 - **Floating-point properties are formatted in the current locale.** A GTK3
   probe under this host's locale printed `xalign=0,5` with a comma and made
   `set_alignment` look broken. Run numeric probes under `LC_ALL=C`.
+- **A custom `GtkWidget` subclass registers and instantiates.**
+  `Glib::Type->register_object('Gtk4::Widget','My::Class')` succeeds, the class
+  instantiates, and the instance passes `->isa('Gtk4::Widget')`. Custom
+  subclassing is therefore proven to that extent, and is no longer merely
+  unestablished.
+- **Layout vfunc overrides on such a subclass are silently ignored.** This is
+  the decisive limitation. With `MEASURE`, `SIZE_ALLOCATE`, `do_measure`, and
+  `do_size_allocate` all defined on one `Gtk4::Widget` subclass, **none** was
+  called during real layout in a mapped Wayland window, and the introspected
+  `measure('horizontal',-1)` returned `0,0,-1,-1` rather than the override's
+  values. The widget was allocated height 0 against an override claiming 40.
+  There is no warning and no error. Those vfuncs are C struct fields and are
+  not introspectable, so a Perl sub cannot install itself into the class
+  vtable. **Consequence: reimplementing a removed container as a custom widget
+  is not possible through this binding.** Composing GTK4's existing layout
+  managers is the available route. See D025.
+
+  Method note: a sub named `measure` (lowercase) *does* get called, but only
+  because it shadows the introspected `measure` method when Perl code calls
+  `$widget->measure(...)` directly. That is a Perl method call, not GTK
+  invoking a vfunc, and mistaking one for the other overstates what the
+  binding supports. Probe with the uppercase/`do_`-prefixed names only, and
+  judge by whether GTK's own layout pass calls them.
+- **`Glib::Type->from_package` does not exist on this binding.** The call dies
+  with `Can't locate object method "from_package" via package "Glib::Type"`.
+  The available `Glib::Type` methods are `list_ancestors`, `list_interfaces`,
+  `list_signals`, `list_values`, `package_from_cname`, `register`,
+  `register_enum`, `register_flags`, and `register_object`. An earlier reading
+  recorded it as *reporting classes absent*, which implied it worked and
+  answered wrongly; it simply is not there. `Glib::Type->list_values` on an
+  introspected enum such as `Gtk4::ConstraintStrength` also does not return an
+  arrayref. Probe a class by constructing it inside `eval`, never by type
+  lookup — the same lesson as the `->can` segfault.
+- These construct successfully: `Gtk4::Fixed`, `Gtk4::Overlay`,
+  `Gtk4::CenterBox`, `Gtk4::ConstraintLayout`, `Gtk4::BinLayout`.
+  `Gtk4::CustomLayout->new` requires 4 arguments and `Gtk4::Constraint->new`
+  requires 8 after the class name
+  (`target, target_attribute, relation, source, source_attribute, multiplier,
+  constant, strength`), so a bare `->new` reports `passed too few parameters`.
+- **`Gtk4::Constraint` strength must be the numeric enum.** Passing the
+  nickname `'required'` warns `Argument "required" isn't numeric` and silently
+  coerces the strength to **0**, producing a constraint that does not bind at
+  all while the object still constructs. `GTK_CONSTRAINT_STRENGTH_REQUIRED` is
+  `1001001000`, which reads back correctly through `get_strength`. A
+  non-binding size pin read back as a plausible-looking but wrong geometry in
+  an earlier probe.
+- **`backend_probe` never sets an `ok` key.** It returns either `error` or the
+  display fields (`class`, `name`, `requested`, `session`, `wayland`,
+  `wayland_display`). Checking `->{ok}` reports failure against a perfectly
+  good Wayland display; check `->{error}`.
+- **A widget's own CSS padding falsifies a geometry probe.** A
+  `Gtk4::Button` given `set_size_request(40,24)` measured `get_width` **26**
+  at origin **7,7** inside its slot, because the theme's button style insets
+  the allocation. The same probe with a `Gtk4::Label` child measured exactly
+  40 at origin 0. A uniform offset across every row of a geometry table is
+  the signature of this, not of a layout bug: use a CSS-neutral child such as
+  a `Gtk4::Label` when measuring a container's placement.
 
 ## D007 — Canonical application ID
 
@@ -647,9 +704,16 @@ into GTK4's three-valued enum: `<= .25` is `start`, `>= .75` is `end`, otherwise
 Alternatives:
 
 1. Implement a custom `GtkWidget` subclass reproducing `GtkAlignment` exactly,
-   including fractional scales. Rejected for now: it needs `measure`/`size_allocate`
-   vfunc overrides through the introspection binding, which D006 has not yet
-   established, for a construct no bundled layout exercises fractionally.
+   including fractional scales. **Not merely deferred — currently impossible
+   through this binding.** The earlier wording said this needed
+   `measure`/`size_allocate` vfunc overrides "which D006 has not yet
+   established", which implied an open question. It is now established as a
+   negative: a `Gtk4::Widget` subclass registers and instantiates, but its
+   layout vfunc overrides are **silently ignored** — `MEASURE`,
+   `SIZE_ALLOCATE`, `do_measure`, and `do_size_allocate` were all defined on
+   one subclass and none was called during real layout, with no warning. See
+   D006. This alternative cannot be revived until D006's binding question is
+   resolved (a project wrapper layer, or a different binding).
 2. Drop `AB` and require layouts to set alignment on the child directly.
    Rejected: `AB` is a layout-visible identifier and D002 makes it a
    compatibility API.
@@ -657,6 +721,10 @@ Alternatives:
    contributes no box to the tree. Rejected: `AB` can be named as a packing
    target by its siblings and appears in `$renderer->{widgets}`, so removing the
    node would change the tree the layout describes.
+4. Compose GTK4's `Gtk4::ConstraintLayout` on the `AB` container, expressing
+   the legacy `xalign`/`yalign`/`xscale`/`yscale` arithmetic as linear
+   constraints. **This is the route that replaces alternative 1**, and it is
+   measured exact — see the consequences section below.
 
 Consequences — where this is exact and where it is not:
 
@@ -694,6 +762,51 @@ that already existed rather than proving new behaviour, and the fractional gap
 above is what still blocks the row. Revisit if a user layout is
 found relying on a fractional alignment or scale, which would promote
 alternative 1 from deferred to required.
+
+**2026-09-07, measured: `Gtk4::ConstraintLayout` reproduces `GtkAlignment`
+exactly, so the gap above is closable without a custom widget.** Alternative 1
+is impossible (D006), but alternative 4 is not. A single container whose
+layout manager is a `Gtk4::ConstraintLayout`, given the legacy arithmetic as
+two linear constraints per axis
+
+	width = xscale*slot + (1-xscale)*child_min
+	left  = xalign*(1-xscale)*slot - xalign*(1-xscale)*child_min
+
+was measured against `Gtk3::Alignment` on the same fixture, the same 400px
+slot, and the same `Gtk4::Label`/`Gtk3::Label` child with
+`set_size_request(40,24)`, on the real Wayland connection under `LC_ALL=C`:
+
+| `xalign` | `xscale` | GTK3 `x,w` | GTK4 `x,w` |
+|---:|---:|---:|---:|
+| 0 | 0 | 0,40 | 0,40 |
+| 0.3 | 0 | 108,40 | 108,40 |
+| 0.5 | 0 | 180,40 | 180,40 |
+| 0.7 | 0 | 252,40 | 252,40 |
+| 1 | 0 | 360,40 | 360,40 |
+| 0 | 0.5 | 0,220 | 0,220 |
+| 0.3 | 0.5 | 54,220 | 54,220 |
+| 0.5 | 0.5 | 90,220 | 90,220 |
+| 0.7 | 0.5 | 126,220 | **125**,220 |
+| 1 | 0.5 | 180,220 | 180,220 |
+| 0 | 1 | 0,400 | 0,400 |
+| 0.3 | 1 | 0,400 | 0,400 |
+| 0.5 | 1 | 0,400 | 0,400 |
+| 0.7 | 1 | 0,400 | 0,400 |
+| 1 | 1 | 0,400 | 0,400 |
+
+Fourteen of fifteen agree exactly; one differs by 1px from constraint-solver
+rounding. Both fractional losses this entry documents — a fractional alignment
+and a fractional scale — are reproduced correctly, which the `halign`/`valign`
+translation cannot express at all.
+
+Two probe artifacts had to be removed before these numbers were trustworthy,
+and both are recorded in D006 because they produce plausible wrong readings
+rather than obvious failures: a `Gtk4::Button` child reports a 26px width at a
+7px inset from its own theme CSS, which offsets every row of the table
+uniformly; and a `Gtk4::Constraint` built with the strength nickname
+`'required'` coerces to strength 0 and does not bind, so the size pin silently
+has no effect. An earlier probe hit both and read as "uniformly +10 off with
+the child stuck at its natural size".
 
 ## D026 — `WB` becomes a plain box, and its purpose is not ported
 
@@ -1009,6 +1122,77 @@ against pristine:
 - **The two ellipsize labels must carry identical text** for the same reason:
   an un-ellipsized minimum tracks the text width, so comparing two different
   strings measures the strings rather than the option.
+
+## D029 — Prefer the native GTK4 mechanism, and build the equivalent when none exists
+
+Status: **Accepted**
+
+Context:
+
+A standing instruction from the user, given at the end of the 2026-09-07
+session and clarified through two rounds of questions:
+
+> Basically I would rather simplify and implement things the GTK4 native way
+> than trying to port the exact GTK3 thing.
+
+and, when asked whether a not-yet-ported option such as `markup=` should make
+the renderer refuse to render:
+
+> we should try to find equivalent in this case in GTK4, if none exists, we
+> must implement
+
+This governs how every future increment chooses between mechanisms, which is
+why it is recorded as a decision rather than only as a handoff note.
+
+Decision:
+
+1. **Native mechanisms, preserved behaviour.** Use the idiomatic GTK4 API for
+   everything, and keep the legacy behaviour that API produces. Reach for the
+   GTK4-native mechanism first; stop reproducing legacy quirks for their own
+   sake.
+2. **Fail loudly** on a construct that is genuinely unsupported: refuse to
+   render rather than silently approximate.
+3. **Find the GTK4 equivalent; if none exists, build it.** Nothing is
+   deliberately dropped.
+
+This does **not** override D002 or D013, and that was the point of the two
+clarifying rounds:
+
+- **D002** still holds: layout identifiers, syntax, meaningful options, and
+  saved data remain compatibility APIs. "Native mechanism" is about the
+  toolkit call underneath, never about rewriting the layout language to mirror
+  GTK4.
+- **D013** still holds: no UI redesign in the parity release. Choosing the
+  native mechanism is not licence to restyle. D023, D024, D027, and D028 are
+  the model — each replaced a mechanism GTK4 removed while keeping the
+  rendering GTK3 produced.
+
+Consequences and bounds:
+
+- **The emphasis changes, not the accepted direction.** D023–D028 already did
+  this; nothing accepted is reversed.
+- **Clause 3 is bounded by the binding, not by ambition.** "We must implement"
+  cannot mean a custom widget reproducing a removed container: a
+  `Gtk4::Widget` subclass registers, but its layout vfunc overrides are
+  silently ignored (D006). Until D006's binding question is resolved, native
+  means **composing GTK4's existing layout managers** —
+  `Gtk4::ConstraintLayout` being the demonstrated case, which closed D025's
+  fractional gap without a subclass.
+- **Clause 2 is close to moot in practice, and must not be over-applied.** The
+  realistic failure case is a construct nobody has implemented *yet*, not one
+  abandoned. Clause 2 does not mean the renderer refuses every layout using an
+  unported option: `markup=` alone has 76 uses, and refusing those would take
+  the renderer from rendering 8 widget types to refusing nearly every real
+  layout, destroying the incremental path. The existing `Unhandled` accessor
+  stays the mechanism for a not-yet-ported option — read but reported, never
+  silently accepted.
+
+Evidence or removal condition:
+
+Accepted 2026-09-07 as a standing instruction from the user. Revisit if a
+native mechanism is found that cannot preserve legacy behaviour, which would
+force a choice between this entry and D002/D013 rather than the coexistence
+recorded here.
 
 ## Decision template
 

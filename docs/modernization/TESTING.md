@@ -450,6 +450,30 @@ Corrections recorded on 2026-09-07, replacing two earlier readings:
   a stray `gmusicbrowser.pl` if a `-cmd Quit` route is attempted again;
   gmusicbrowser also outlives `timeout`, so an outer hard kill is needed.
 
+Two further corrections recorded on 2026-09-07, both to probe *method* rather
+than to a test result. Neither had reached a committed test, but both were
+recorded as binding evidence and both overstate what was shown:
+
+- **`Glib::Type->from_package` was said to report lazily-registered classes as
+  absent, with probing-by-construction reversing the result.** The
+  construction results stand — `Gtk4::Fixed`, `Gtk4::Overlay`,
+  `Gtk4::CenterBox`, `Gtk4::ConstraintLayout`, and `Gtk4::BinLayout` all
+  construct — but `from_package` is **not a method on this binding**, so it
+  never reported anything and there is no evidence for lazy registration. The
+  bad reading came from treating a died method call as a falsy answer. Probe a
+  class by constructing it inside `eval`.
+- **`measure` and `do_measure` were listed among five vfunc names tried, none
+  called.** The conclusion is right and is now the basis of D025's alternative
+  1 being impossible, but the evidence was contaminated: a lowercase `measure`
+  sub *shadows* the introspected method, so the probe's own
+  `$widget->measure(...)` call invoked it. Re-run with only the
+  uppercase/`do_`-prefixed names on a subclass with nothing shadowing a real
+  method, `MEASURE`, `SIZE_ALLOCATE`, `do_measure`, and `do_size_allocate` are
+  all defined and **none** is called during GTK's own layout pass; the widget
+  is allocated height 0 against an override claiming 40 and
+  `measure('horizontal',-1)` reads back `0,0,-1,-1`. Judge a vfunc override by
+  whether GTK's layout pass calls it, never by a direct Perl method call.
+
 The GTK3 side of this increment: `@Commands` in
 `gmusicbrowser_frontend_legacy.pm` is shared code, and widening it makes the
 bridge require `NextSong` and `PrevSong` at construction. The failure mode is
