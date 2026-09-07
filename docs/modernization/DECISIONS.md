@@ -677,9 +677,16 @@ either spelling so they do not pin one theme's convention.
 
 ## D025 — `AB` becomes alignment properties on its child
 
-Status: **Accepted**
+Status: **Accepted**, with the fractional case superseded by D030
 
 Gate: before any `AB` row is advanced past `GTK4 in progress`
+
+Superseded in part on 2026-09-07: the bucketing this entry accepted still
+applies to every integral value, but a fractional alignment or scale now goes
+through a `Gtk4::ConstraintLayout` instead of being bucketed. See **D030**,
+which the user approved after the exactness measurement recorded below. The
+two documented losses in the consequences section are therefore closed rather
+than outstanding.
 
 Context:
 
@@ -1193,6 +1200,113 @@ Accepted 2026-09-07 as a standing instruction from the user. Revisit if a
 native mechanism is found that cannot preserve legacy behaviour, which would
 force a choice between this entry and D002/D013 rather than the coexistence
 recorded here.
+
+## D030 — A fractional `AB` alignment or scale uses a constraint layout
+
+Status: **Accepted**
+
+Supersedes: the fractional half of D025
+
+Context:
+
+D025 accepted bucketing the legacy `AB` numbers into GTK4's three-valued
+`halign`/`valign` enum, with two documented losses reachable only from a
+hand-written layout: a fractional alignment collapsed to `start`/`center`/`end`,
+and a fractional scale became a full fill. It deferred a custom `GtkWidget`
+subclass as the exact route.
+
+Two findings changed the picture:
+
+- That custom-widget route is **impossible** through this binding, not merely
+  unestablished. A `Gtk4::Widget` subclass registers and instantiates, but its
+  layout vfunc overrides are silently ignored. See D006.
+- `Gtk4::ConstraintLayout` reproduces `GtkAlignment` **exactly**, with no
+  subclass. Measured against `Gtk3::Alignment` on the same fixture, the same
+  400px slot, and the same label child, 14 of 15 fractional
+  `xalign`/`xscale` combinations agree exactly and one differs by 1px from
+  constraint-solver rounding. The table is in D025.
+
+D029 makes composing GTK4's own layout managers the native answer here, and
+its "find the equivalent; if none exists, build it" clause is satisfied by an
+equivalent that exists.
+
+Decision:
+
+The `AB` container takes a `Gtk4::ConstraintLayout` when any of its four
+numbers has no enum equivalent, and keeps the D025 `halign`/`valign` path
+otherwise. Per axis the layout carries two constraints:
+
+	size = scale*slot + (1-scale)*minimum
+	pos  = align*(1-scale)*slot - align*(1-scale)*minimum
+
+The second is the substituted form of `align*(slot-size)`, which keeps each
+constraint linear in a single source term as `GtkConstraint` requires. The
+child's `minimum` comes from `measure($orientation,-1)`, which returns the
+right value before realization.
+
+An alignment of `0`, `.5` or `1` and a scale of `0` or `1` keep the plain
+property path, so **every bundled layout is unaffected**: D025 established
+that the only values appearing in `layouts/` are `0`, `0.0`, `.5`, `0.5`, `1`
+for alignment and `0`, `0.0` for scale. Note a scale of `.5` needs the
+constraint path even though an alignment of `.5` does not, because `center`
+expresses the latter and nothing expresses "half fill".
+
+A value that is non-numeric or outside 0..1 cannot drive the arithmetic. It
+falls back to the legacy default and is reported through `Unhandled`. The
+refusal is expressed by the internal `_number` helper returning nothing, which
+is what keeps the `.5`, `0.0` and `1.0` spellings the bundled layouts use from
+being reported as refused.
+
+Alternatives:
+
+1. Keep D025's bucketing and record the gap permanently. Rejected: D029 asks
+   for the native equivalent where one exists, and one does.
+2. A custom widget reproducing `GtkAlignment`. Impossible through this
+   binding; see above and D006.
+3. Use a constraint layout for every `AB`, including the integral cases.
+   Rejected: it would put the whole bundled-layout surface onto a new
+   mechanism to no benefit, where the property path is already exact for it.
+
+Consequences:
+
+The two losses D025 documented are closed, so the reason that entry gave for
+holding the `AB` row at `GTK4 in progress` no longer applies. The row still
+does not advance, for the reasons that apply to every row: input, focus,
+accessibility, and saved-profile comparison against GTK3 are unfinished.
+
+One behaviour change beyond the fractional case: a non-numeric `xalign` now
+renders **centred** rather than bucketing to `start`. Centred is the legacy
+`@default_options` value, so this is a correction toward GTK3, and it is
+covered by an assertion that fails against the previous renderer with
+`got 'start' / expected 'center'`.
+
+The `Gtk4::Constraint` strength must be passed as the numeric enum
+(`1001001000`); the nickname `'required'` warns `isn't numeric` and coerces to
+strength 0, building a constraint that does not bind. See D006.
+
+Evidence or removal condition:
+
+`t/gtk4/30_Box.t` asserts the real allocated size and offset for a fractional
+`xalign`, a fractional `xscale`, both together, and a refused value, and
+asserts that the integral cases keep a non-constraint layout manager so the
+common path cannot regress. `t/04_Gtk4LayoutRenderer.t` asserts the constraint
+count, multipliers, relation, source attribute, numeric strength, and the
+`Unhandled` bookkeeping.
+
+Run against the previous renderer, `t/gtk4/30_Box.t` fails 11 of 107 on real
+Wayland and `t/04_Gtk4LayoutRenderer.t` fails 11 of 199 offline. Controls that
+pass on both trees: the five "keeps the plain box layout" assertions, the
+slack sanity checks, `a fractional xalign with xscale=0 leaves the child at
+its natural size`, and `a fractional alignment the constraint path implements
+is not reported`.
+
+Two assertions were vacuous when first written and were strengthened after
+running them against pristine, which is worth knowing before extending them:
+"not collapsed to the near edge" passes against the old renderer because it
+buckets `0.3` to `center`, not `start` (its threshold is `<=.25`); and
+"places the child 70% across the remaining slack" passes when the child fills
+the slot, because the target offset is then 0 and so is the measured one. Both
+are now paired with an assertion that the slack exists.
 
 ## Decision template
 

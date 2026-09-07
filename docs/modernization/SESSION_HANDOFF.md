@@ -1,9 +1,13 @@
 # Session handoff
 
-Status: the tree is clean. **The decision backlog is cleared.** All six
-Proposed entries that gated parity rows — D023, D024, D025, D026, D027, D028 —
-were put to the user and are now **Accepted**. That was the main thing
-stopping the parity checklist from moving, and it is done.
+Status: the tree is clean. This session recorded the user's standing
+native-mechanism policy as **D029** and then closed `AB`'s fractional
+alignment gap through a `Gtk4::ConstraintLayout`, recorded as **D030**, which
+supersedes the fractional half of the Accepted D025. Two commits of code and
+documentation plus this one.
+
+The decision backlog remains cleared: D023, D024, D025, D026, D027, and D028
+are all **Accepted**.
 
 Five were accepted as implemented, with no code change. One was accepted
 *against* the entry's own recommendation and became this session's increment:
@@ -25,6 +29,73 @@ Last session: 2026-09-07. Branch `gtk4-alpha`.
 
 Read `MODERNIZATION.md` and `AGENTS.md` first. This file only records where the
 previous session stopped and what the next one should verify before continuing.
+
+## This session's increment: `AB` fractional alignment via a constraint layout
+
+`AB` is the legacy `Gtk3::Alignment->new(xalign,yalign,xscale,yscale)`
+(`gmusicbrowser_layout.pm:2333`, defaults `.5,.5,1,1`). D025 accepted
+bucketing those four numbers into GTK4's three-valued `halign`/`valign`, which
+loses a fractional alignment (`0.3` collapsed to `start`) and a fractional
+scale (`0.5` became a full fill). D030 closes both.
+
+**The gap was closable because `Gtk4::ConstraintLayout` reproduces
+`GtkAlignment` exactly.** Measured against `Gtk3::Alignment` on the same
+fixture, the same 400px slot and the same label child, under `LC_ALL=C`: 14 of
+15 fractional `xalign`/`xscale` combinations agree exactly, one differs by 1px
+from constraint-solver rounding. The table is in D025's evidence section.
+
+The arithmetic, per axis, as two constraints:
+
+	size = scale*slot + (1-scale)*minimum
+	pos  = align*(1-scale)*slot - align*(1-scale)*minimum
+
+The second is the substituted form of `align*(slot-size)`, which keeps each
+constraint linear in one source term as `GtkConstraint` requires. `minimum`
+comes from `measure($orientation,-1)`, which returns the right value before
+realization.
+
+**The common path deliberately does not change.** A constraint layout is
+installed only where a value has no enum equivalent; `0`, `.5`, `1` and a
+0-scale keep the plain property path, which is every value that appears in
+`layouts/`. Five assertions pin that, and they pass on both trees.
+
+Four things worth carrying forward:
+
+- **A scale of `.5` needs the constraint path even though an alignment of `.5`
+  does not.** `center` expresses a half alignment; nothing expresses "half
+  fill". Getting this wrong is what made the first run leave `ABscale` on a
+  `Gtk4::BoxLayout` and fill its slot — diagnosed by reading
+  `get_layout_manager` per container rather than guessing from the geometry.
+- **A refused value must not be confused with a differently-spelled one.** The
+  first version compared the parsed value against the coerced one as strings,
+  which reported `.5`, `0.0` and `1.0` — spellings the bundled layouts
+  actually use — as unhandled. `_number` now returns nothing for a refused
+  value, so the caller can both default and report without that false
+  positive. Check any new `Unhandled` bookkeeping against the spellings in
+  `layouts/`, not just against a bad value.
+- **A non-numeric `xalign` now renders centred, not `start`.** Centred is the
+  legacy `@default_options` value, so this is a correction toward GTK3; the
+  assertion fails against pristine with `got 'start' / expected 'center'`.
+- **Two assertions were vacuous when first written** and pristine caught both.
+  See TESTING.md; the short version is that the old renderer buckets `0.3` to
+  `center` rather than `start`, and that a "70% across the slack" check passes
+  when the child fills the slot because both sides are then 0.
+
+### Verification for this increment
+
+- `t/gtk4/30_Box.t` fails **11 of 107** against a pristine `git archive HEAD`
+  with only the changed test files and `t/layouts/align.layout` overlaid, on
+  real Wayland. The pristine renderer was confirmed to contain no
+  `_SetConstraints` before the comparison was trusted.
+- `t/04_Gtk4LayoutRenderer.t` fails **11 of 199** offline against the same.
+- Controls pass on both trees: the five "keeps the plain box layout"
+  assertions, the three slack sanity checks, `a fractional xalign with
+  xscale=0 leaves the child at its natural size`, and `a fractional alignment
+  the constraint path implements is not reported`.
+- Each new assertion was checked individually from `prove -v`, and the
+  pristine failure of the non-numeric case was confirmed to be
+  `got 'start' / expected 'center'` — the right reason.
+- No shared code changed. `make test-gtk3` was run anyway and passes.
 
 ## Standing policy: the GTK4-native mechanism first — now D029
 
@@ -237,6 +308,8 @@ Everything is committed. For the number of commits past `master`, run
 `git rev-list --count master..HEAD` rather than trusting a figure here.
 Newest first:
 
+	fe65c9c gtk4: render a fractional AB alignment through a constraint layout
+	9a12acc docs: record the native-mechanism policy and the layout vfunc finding
 	adde70b gtk4: normalise the label ellipsize=1 shorthand to end
 	f6d2927 docs: stop recording a commit count that goes stale on write
 	f74d4e1 docs: record the landed commits in the handoff
@@ -941,20 +1014,20 @@ Commands that were actually run and passed this session:
 	make test-gtk3
 	git diff --check
 
-`make test-modernization`: **344** executed assertions passed, no skips.
+`make test-modernization`: **364** executed assertions passed, no skips.
 Running totals: 269 two sessions ago, 298 after `Next`/`Prev`, 315 after
 `Filler`, 317 after the labels fixture, 325 after `size=`/`relief=`, 342 after
-label alignment, 344 after the `ellipsize=1` normalisation. The skip count was
-read from `prove -v`, not assumed.
+label alignment, 344 after the `ellipsize=1` normalisation, 364 after the `AB`
+constraint layout. The skip count was read from `prove -v`, not assumed.
 
-`make test-gtk4` on the real Wayland connection: **261** TAP results,
-comprising **255 executed assertions passed** and the same six pre-existing M1
+`make test-gtk4` on the real Wayland connection: **287** TAP results,
+comprising **281 executed assertions passed** and the same six pre-existing M1
 feasibility probes skipped, 0 failures. Per file: 18 binding (which is where
-all six skips live), 4 proof-of-life, 84 pane, 81 box, 74 icon. Running totals
+all six skips live), 4 proof-of-life, 84 pane, 107 box, 74 icon. Running totals
 for the same command: 173 before `Next`/`Prev`, 184 after it, 202 after
 `Filler`, 216 after the `AB` coverage, 246 after `size=`/`relief=`, 258 after
-label alignment, 261 now. Do not restate this as 255
-passing assertions. The six skips were counted by copying the runner to
+label alignment, 261 after the `ellipsize=1` normalisation, 287 now. Do not
+restate this as 281 passing assertions. The six skips were counted by copying the runner to
 `tools/.verbose-smoke-tmp`, switching `prove` to `-v`, and grepping
 `^ok [0-9]+ # skip` — six matches, all `BLOCKED:` M1 probes in
 `t/gtk4/00_Binding.t`. Not assumed. Note that a copy of the runner placed
@@ -1158,15 +1231,13 @@ means the reported ~1190px window is not the layout's designed size.
 3. Keep running `make test-gtk4` on the real Wayland connection with the system
    packages, outside the execution sandbox when needed. Count explicit skips.
    Also run `make test-gtk3` after any shared-code change; it works now.
-4. `AB` and `WB`. D025 and D026 are **Accepted** as documented
-   approximations. D025's fractional alignment/scale gap is now **closable
-   and being closed**: its alternative 1 (a custom widget with
-   `measure`/`size_allocate` vfunc overrides) is not merely unestablished but
-   **impossible through this binding** — the overrides are silently ignored,
-   see D006 — while `Gtk4::ConstraintLayout` was measured to reproduce
-   `GtkAlignment` exactly and is the replacement route, recorded as D025
-   alternative 4. D026 alternative 2 — folding `hover_layout` into `WB` — is
-   still undecided and still needs a popup-window design.
+4. ~~`AB`'s fractional gap.~~ **Closed** by D030: a fractional alignment or
+   scale goes through a `Gtk4::ConstraintLayout` reproducing `GtkAlignment`
+   exactly, and the integral path every bundled layout uses is unchanged. The
+   `AB` row still does not advance, but only for the input/focus/
+   accessibility/saved-profile reasons that hold every row.
+   `WB` is untouched and D026 alternative 2 — folding `hover_layout` into
+   `WB` — is still undecided and still needs a popup-window design.
 5. D006 binding evidence. **Already recorded, keep extending it.** D006 now
    holds the graphene marshalling failure, the `->can` segfault, the
    widget-before-`Gtk4::init` segfault, the empty-string boolean artifact, the
@@ -1195,6 +1266,32 @@ means the reported ~1190px window is not the layout's designed size.
 
 ## Working notes
 
+- **A widget's own CSS padding falsifies a geometry probe.** A `Gtk4::Button`
+  asked for `set_size_request(40,24)` measures 26px wide at a 7px inset,
+  because the theme's button style insets the allocation; a `Gtk4::Label`
+  measures exactly 40 at 0. A *uniform* offset across every row of a geometry
+  table is the signature of this, not of a layout bug. Use a CSS-neutral child
+  when measuring a container's placement.
+- **`Gtk4::Constraint` strength must be the numeric enum.** `'required'` warns
+  `isn't numeric` and coerces to strength **0**, so the constraint constructs
+  and does not bind. Required is `1001001000`.
+- **`Gtk4::ConstraintLayout` needs its constraints added before the window is
+  presented.** Added afterwards on an already-mapped window they had no effect
+  in a probe, leaving the child at its natural size. The renderer adds them
+  during construction, which is why it works.
+- **Read `get_layout_manager` when a constraint-driven container misbehaves.**
+  A container that still carries a `Gtk4::BoxLayout` never reached the
+  constraint path at all, which is a different bug from constraints that are
+  present but wrong, and the geometry alone does not distinguish them.
+- **A scale of `.5` has no GTK4 enum even though an alignment of `.5` does.**
+  `center` expresses a half alignment; nothing expresses "half fill". A
+  fractional-value check written for alignments will silently pass a
+  fractional scale through to the bucketing path.
+- **Check new `Unhandled` bookkeeping against the spellings the bundled
+  layouts really use.** Comparing a parsed value against its coerced form as
+  strings reported `.5`, `0.0` and `1.0` as unhandled — all three appear in
+  `layouts/`. Have the coercion helper return nothing for a refused value
+  instead, so defaulting and reporting stay separable.
 - **`ToggleButton` is `Layout::TogButton`, not a `Layout::Button` variant.** It
   is a show/hide controller for other layout widgets and dispatches no command.
   See the section at the top of this file before scoping it.

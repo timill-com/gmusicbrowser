@@ -56,7 +56,7 @@ surface. Numeric suffixes retain the base element's behaviour.
 | `FB` | Fixed-position container | Not started |
 | `FR` | Frame | GTK4 in progress |
 | `SB` | Scroller | GTK4 in progress |
-| `AB` | Alignment wrapper | GTK4 in progress, see D025 (accepted) |
+| `AB` | Alignment wrapper | GTK4 in progress, see D025/D030 (accepted) |
 | `WB` | Event wrapper | GTK4 in progress, see D026 (accepted) |
 | `@layout` | Embedded layout | Not started |
 
@@ -235,11 +235,11 @@ request.
 `AB` and `WB` have no direct GTK4 equivalent, because `GtkAlignment` and
 `GtkEventBox` were both removed. `AB` becomes alignment properties on its child
 (**D025**) and `WB` becomes a plain box (**D026**). Both entries are now
-**Accepted**, as documented approximations rather than closed gaps, so both
-rows deliberately stay at `GTK4 in progress`: `AB` still buckets a fractional
-alignment or scale, and `WB` still has none of the behaviour it existed to
-provide. Acceptance removed the decision gate on each row without advancing
-it.
+**Accepted**, and both rows stay at `GTK4 in progress`. `AB`'s fractional
+bucketing has since been closed by **D030** (see below); what holds its row is
+now only the input, focus, accessibility, and saved-profile comparison every
+row needs. `WB` still has none of the behaviour it existed to provide.
+Acceptance removed the decision gate on each row without advancing it.
 
 `AB` alignment is now covered by real allocations in `t/gtk4/30_Box.t`, which
 D025 requires before that row can move: four equally sized expanding `AB` slots
@@ -247,6 +247,20 @@ of 150px place their child at x=0, 71, and 142 for `xalign` 0, .5, and 1, while
 the default `xscale=1` case fills its slot outright. That is coverage of an
 implementation that already existed, not a proof of new behaviour — the same
 file passes against the preceding commit.
+
+`AB`'s fractional gap is **closed** as of 2026-09-07. A fractional alignment
+or scale now goes through a `Gtk4::ConstraintLayout` reproducing the legacy
+arithmetic exactly, measured against `Gtk3::Alignment` on the same fixture:
+14 of 15 fractional combinations agree exactly, one differs by 1px from solver
+rounding. The integral values every bundled layout uses keep the plain
+`halign`/`valign` path, so the common path is untouched. See **D030**, which
+supersedes the fractional half of D025. The row still does not advance,
+because input, focus, accessibility, and saved-profile comparison against GTK3
+are unfinished — the same reasons that apply to every other row.
+
+The paragraph below records what D025 originally blocked the row on, and is
+kept because it explains why the row was held; the two losses it names are no
+longer outstanding.
 
 What still blocks `AB` from parity is narrower than "approximation": the
 translation is **exact for every bundled layout**, because the only alignment

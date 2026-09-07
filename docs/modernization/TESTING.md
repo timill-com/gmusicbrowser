@@ -10,12 +10,12 @@ make test-modernization
 
 This runs the neutral layout parser, frontend contract and lifecycle, legacy
 adapter and lifecycle integration, and GTK4 renderer contract tests. On
-2026-09-07 it reported 344 executed assertions passed and no skips. Running
+2026-09-07 it reported 364 executed assertions passed and no skips. Running
 totals: 269 at the start of the previous session, 298 after `Next`/`Prev`, 315
 after `Filler`, 317 after the shared labels fixture, 325 after the
 `size=`/`relief=` increment, 342 after label alignment/ellipsize, 344 after the
-`ellipsize=1` normalisation. The skip count was read from `prove -v`, not
-assumed. The
+`ellipsize=1` normalisation, 364 after the `AB` constraint layout. The skip
+count was read from `prove -v`, not assumed. The
 renderer test uses small in-process GTK doubles; it proves the
 parser/renderer/command wiring without claiming that a real GTK4 binding or
 display passed.
@@ -73,16 +73,41 @@ The action test uses [cycle-handle-focus](https://docs.gtk.org/gtk4/signal.Paned
 before [move-handle](https://docs.gtk.org/gtk4/signal.Paned.move-handle.html).
 
 `t/gtk4/30_Box.t` adds real `HB`/`VB` packing geometry to the runner, plus the
-`AB` and label alignment coverage. On 2026-09-07, after the `ellipsize=1`
-normalisation, the full
-`make test-gtk4` run reported 261 TAP results: 255 executed assertions passed
+`AB` and label alignment coverage. On 2026-09-07, after the `AB` constraint
+layout, the full
+`make test-gtk4` run reported 287 TAP results: 281 executed assertions passed
 and the same six feasibility probes were skipped, 0 failures. The skips were
 counted from `prove -v` and are the same six M1 probes as before. Running
 totals for the same command: 173 results before `Next`/`Prev`, 184 after it,
 202 after `Filler`, 216 after the `AB` alignment coverage, 246 after
 `size=`/`relief=`, 258 after label alignment, 261 after the `ellipsize=1`
-normalisation. Per file: 18 binding, which is
-where all six skips live, 4 proof-of-life, 84 pane, 81 box, 74 icon.
+normalisation, 287 after the `AB` constraint layout. Per file: 18 binding,
+which is where all six skips live, 4 proof-of-life, 84 pane, 107 box, 74 icon.
+
+The `AB` constraint-layout assertions are behaviour, not construction. Against
+the previous renderer, `t/gtk4/30_Box.t` fails **11 of 107** on real Wayland
+and `t/04_Gtk4LayoutRenderer.t` fails **11 of 199** offline, verified by
+extracting `git archive HEAD` to a scratch directory, overlaying only the
+changed test files and `t/layouts/align.layout`, and confirming the pristine
+renderer contains no `_SetConstraints` before trusting the comparison.
+
+Two of those assertions were vacuous as first written, and pristine is what
+caught both. Recorded because the traps generalise:
+
+- **"not collapsed to the near edge" passes against the old renderer.** Its
+  `_align` threshold is `<=.25` for `start`, so `xalign=0.3` buckets to
+  `center`, not `start`, and lands well away from the edge. The
+  discriminating fact is that it is not *centred* either.
+- **"places the child 70% across the remaining slack" passes when the child
+  fills the slot,** because the target offset is then `0.7*(slot-slot)` = 0
+  and the measured offset is also 0. It only turns on the option once paired
+  with an assertion that the slack exists.
+
+The `Gtk3::Alignment` reference numbers this increment was measured against
+were read with a `Gtk4::Label`/`Gtk3::Label` child, not a `Gtk4::Button`: a
+button given `set_size_request(40,24)` measures 26px wide at a 7px inset from
+its own theme CSS, which offsets every row of a geometry table uniformly and
+looks like a layout bug. See D006.
 They read allocated child offsets with
 [translate_coordinates](https://docs.gtk.org/gtk4/method.Widget.translate_coordinates.html);
 `compute_bounds` and `compute_point` are unusable through this binding, which
