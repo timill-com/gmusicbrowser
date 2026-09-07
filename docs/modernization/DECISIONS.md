@@ -277,6 +277,22 @@ Evidence recorded so far, against the system
 - **`Gtk4::StyleContext->get_property('opacity')` dies** with `type
   Gtk4::StyleContext does not support property 'opacity'`. Style values are
   not readable as GObject properties through this binding.
+- **`Gtk4::SizeGroup` survives unchanged and works fully.** All four modes
+  (`horizontal`, `vertical`, `both`, `none`) construct; `add_widget` raises a
+  36px label to a grouped 180px; `remove_widget` returns it to 36; `get_mode`
+  and `get_widgets` read back. This is what makes D034 a direct translation.
+- **`Gtk4::Notebook` retains the whole legacy API surface** this project needs:
+  `append_page`, `get_n_pages`, `set_current_page`/`get_current_page`,
+  `set_scrollable`, `set_tab_pos`, `popup_enable`, and
+  `set_tab_reorderable` all work. So the legacy `TB` container is portable;
+  `NB` is gated on `Layout::NoteBook`'s own subsystem, not on the binding.
+- **`Gtk4::Fixed` works, but `get_child_position` reads `0 0` until the widget
+  is mapped.** After `put($child,10,20)` it returns `0 0`, and only after the
+  window is presented and the main loop has run does it return `10 20`.
+  `translate_coordinates` is correct immediately. A `Fixed` placement
+  assertion written before mapping therefore reads zero and looks like a
+  placement bug — the same class of trap as the unrealized-`Gtk3::Image`
+  measuring 0.
 
 ## D007 — Canonical application ID
 
