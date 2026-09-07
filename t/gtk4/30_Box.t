@@ -487,6 +487,62 @@ _drain();
 	_drain();
 }
 
+# HSize/VSize size groups as real rendering. GTK4 kept GtkSizeGroup unchanged,
+# so the translation is direct; what needs proving on a real display is that
+# the grouping actually equalises the measured size, which the offline doubles
+# cannot show because they have no layout pass. See D034.
+{	my $gfixture=File::Spec->catfile('t','layouts','sizegroups.layout');
+	my $gcatalog=Layout::Parser::ParseFiles(files=>[$gfixture]);
+	is(scalar @{$gcatalog->{diagnostics}},0,'sizegroups fixture parses without diagnostics');
+	my $grenderer=Layout::Renderer::Gtk4->new
+	(	catalog=>$gcatalog,
+		frontend=>$frontend,
+		labels=>GMB::Test::RendererLabels::labels(),
+	);
+	my $groot=$grenderer->Render('gtk4 sizegroups');
+	$groot->set_direction('ltr');
+	my $gwindow=Gtk4::Window->new;
+	$gwindow->set_default_size(800,400);
+	$gwindow->set_child($groot);
+	$gwindow->present;
+	ok(_wait_for_window($gwindow),'GTK4 window mapped before size group assertions');
+	_drain();
+
+	# HSize0= Text Text2 groups a short label with a long one. The short label
+	# must be pulled up to the long one's minimum, which is the whole point.
+	my ($short)=$grenderer->Widget('Text')->measure('horizontal',-1);
+	my ($long)=$grenderer->Widget('Text2')->measure('horizontal',-1);
+	is($short,$long,'a horizontal size group equalises the minimum width');
+	# and the control that makes it discriminate: an UNGROUPED long label in
+	# the same row keeps its own width, so the equalisation is the group's
+	# doing rather than the row's
+	my ($ungrouped)=$grenderer->Widget('Text3')->measure('horizontal',-1);
+	isnt($ungrouped,$short,'an ungrouped label in the same row keeps its own width');
+	# the grouped width is the long member's, not the short one's, so nothing
+	# was shrunk to fit
+	cmp_ok($short,'>',20,'the group raised the short label rather than shrinking the long one');
+
+	# VSize0= 40 Text4 - a leading number is a size request on the group axis,
+	# and a single named widget takes the legacy early exit with no group
+	my ($t4h)=$grenderer->Widget('Text4')->measure('vertical',-1);
+	cmp_ok($t4h,'>=',40,'a numbered VSize raises the named widget to that height');
+	# HSize1= 120 Text5 Text6 - both get the request, and are grouped as well
+	my ($t5w)=$grenderer->Widget('Text5')->measure('horizontal',-1);
+	my ($t6w)=$grenderer->Widget('Text6')->measure('horizontal',-1);
+	cmp_ok($t5w,'>=',120,'a numbered HSize raises the first named widget');
+	# Text5 is 'y' and Text6 a much wider string, so they differ naturally and
+	# only the group can make them equal. Comparing two labels of the SAME text
+	# would pass against a renderer that ignores size groups entirely.
+	is($t5w,$t6w,'a numbered HSize naming two widgets also groups them');
+	# and the group wins over the bare number: the shared width is the wider
+	# member's natural width, not the 120 the declaration asks for
+	cmp_ok($t5w,'>',120,'the group raises both past the requested width');
+
+	$grenderer->Destroy;
+	$gwindow->destroy;
+	_drain();
+}
+
 # Static markup= as real rendering. Legacy Layout::Label branches at
 # gmusicbrowser_layout.pm:3156 on whether ::UsedFields finds song fields; only
 # the field-free half is ported (D033). A markup that names a size is

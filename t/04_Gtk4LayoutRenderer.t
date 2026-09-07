@@ -224,6 +224,17 @@ use lib '.';
 		return $text;
 	}
 }
+{	package Gtk4::SizeGroup;
+	# GTK4 kept GtkSizeGroup unchanged. The double records its mode and members
+	# rather than equalising anything: the offline file has no layout pass, so
+	# the equalisation itself is proved on real Wayland in t/gtk4/30_Box.t.
+	sub new { bless {mode=>$_[1],widgets=>[]},$_[0] }
+	sub add_widget { push @{$_[0]{widgets}},$_[1] }
+	sub remove_widget { my $s=shift; my $w=shift;
+		@{$s->{widgets}}=grep $_ != $w,@{$s->{widgets}} }
+	sub get_mode { $_[0]{mode} }
+	sub get_widgets { @{$_[0]{widgets}} }
+}
 {	package Gtk4::Image;
 	our @ISA=('Gtk4::Widget::Double');
 	sub new { bless {pixel_size=>-1},$_[0] }
@@ -746,6 +757,67 @@ $zrenderer->Destroy;
 	$renderer->Destroy;
 	is($renderer->{style_provider},undef,'Destroy releases the style provider');
 	is($renderer->{style_rules},undef,'Destroy drops the collected style rules');
+}
+
+# HSize/VSize size groups. Legacy applies them after the packing loop
+# (gmusicbrowser_layout.pm:1056-1070) because they name widgets and containers
+# that must already exist. The parser keeps them in {definitions} rather than
+# {nodes}, since they declare no container. See D034.
+{	my $gfixture=File::Spec->catfile('t','layouts','sizegroups.layout');
+	my $gcatalog=Layout::Parser::ParseFiles(files=>[$gfixture]);
+	is(scalar @{$gcatalog->{diagnostics}},0,'sizegroups fixture parses without diagnostics');
+	my $renderer=Layout::Renderer::Gtk4->new
+	(	catalog=>$gcatalog,
+		frontend=>$frontend,
+		labels=>GMB::Test::RendererLabels::labels(),
+	);
+	$renderer->Render('gtk4 sizegroups');
+
+	# a size group declaration must not become a container or a root
+	is(scalar @{$gcatalog->{layouts}{'gtk4 sizegroups'}{roots}},1,
+		'a size group declaration does not add a root');
+	is($renderer->Widget('HSize0'),undef,'a size group is not built as a widget');
+
+	# HSize0= Text Text2 - names only, so one horizontal group of two.
+	# Guarded so a renderer that creates no groups at all still reaches the
+	# assertions below rather than dying on an undef dereference and hiding
+	# them.
+	my @groups=@{$renderer->{size_groups} || []};
+	is(scalar @groups,3,'three size groups are created');
+	my %bymode;
+	push @{$bymode{$_->get_mode}},$_ for @groups;
+	is(scalar @{$bymode{horizontal}||[]},3,'HSize declarations make horizontal groups');
+	is(scalar @{$bymode{vertical}||[]},0,
+		'VSize0 names one widget, so it makes no group at all');
+
+	# VSize0= 40 Text4 - a leading number sets the request on the group axis and
+	# leaves the other dimension at -1, and 'next if @names==1' means no group
+	is_deeply([$renderer->Widget('Text4')->get_size_request],[-1,40],
+		'a leading number on a VSize sets the height and leaves the width unset');
+	# HSize1= 120 Text5 Text6 - request AND group, since two names follow
+	is_deeply([$renderer->Widget('Text5')->get_size_request],[120,-1],
+		'a leading number on an HSize sets the width and leaves the height unset');
+	is_deeply([$renderer->Widget('Text6')->get_size_request],[120,-1],
+		'the number applies to every widget the group names');
+
+	# control: a widget in no size group keeps an unset request
+	is_deeply([$renderer->Widget('Text3')->get_size_request],[-1,-1],
+		'a widget named by no numbered size group keeps an unset request');
+
+	# HSize2= Text3 Nonexistent - legacy warns; the renderer records instead
+	is_deeply($renderer->UnhandledSizeGroups,{HSize2=>['Nonexistent']},
+		'a size group naming an unknown widget records it');
+	# the known member of that group is still grouped rather than the whole
+	# declaration being discarded
+	my ($withunknown)=grep { grep { $_ == $renderer->Widget('Text3') } $_->get_widgets } @groups;
+	ok($withunknown,'the known members of a partly-unknown group are still grouped');
+	is($withunknown ? scalar($withunknown->get_widgets) : undef,1,
+		'only the resolvable name is added');
+
+	# a size group holds references to its widgets, so Destroy must drop it
+	$renderer->Destroy;
+	is($renderer->{size_groups},undef,'Destroy releases the size groups');
+	is($renderer->UnhandledSizeGroups,undef,'Destroy drops the recorded unknown names');
 }
 
 # Static markup=. Legacy Layout::Label branches at

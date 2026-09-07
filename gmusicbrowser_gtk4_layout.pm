@@ -156,7 +156,53 @@ sub Render
 	$self->{nodes}={map {$_->{name}=>$_} @{$layout->{nodes}}};
 	$self->{stack}={};
 	$self->{globals}=_Globals($layout);
-	return $self->_CreateContainer($layout->{roots}[0]);
+	my $root=$self->_CreateContainer($layout->{roots}[0]);
+	# after the tree, because a size group names widgets and containers that
+	# must already exist - the legacy order at gmusicbrowser_layout.pm:1056
+	$self->_ApplySizeGroups($layout);
+	return $root;
+}
+
+# The legacy HSize/VSize size groups (gmusicbrowser_layout.pm:1056-1070). The
+# parser keeps them in {definitions} rather than {nodes}, since they declare no
+# container; _is_definition already recognises the [HV]Size\d* spelling.
+#
+# GTK4 kept GtkSizeGroup unchanged, so this is a direct translation. The two
+# legacy shapes are preserved exactly:
+#
+#   HSize0= Filler0 LockArtist LockAlbum   group the named widgets
+#   VSize0= 300 HBCover                    set a size request, and group too
+#                                          unless only one widget is named
+#
+# A leading number sets the request on the group's axis and leaves the other
+# dimension at -1, which both toolkits spell the same way. 'next if @names==1'
+# is the legacy early exit: a single named widget gets the request and no
+# group, which is 12 of the 27 bundled uses.
+sub _ApplySizeGroups
+{	my ($self,$layout)=@_;
+	for my $key (sort grep m/^[HV]Size/, keys %{$layout->{definitions}})
+	{	my $definition=$layout->{definitions}{$key};
+		my $vertical= $key=~m/^V/;
+		my @names=grep length, split /\s+/,$definition->{raw};
+		if (@names && $names[0]=~m/^\d+$/)
+		{	my $size=shift @names;
+			my @request= $vertical ? (-1,$size) : ($size,-1);
+			$_->set_size_request(@request)
+				for grep defined, map $self->{widgets}{$_}, @names;
+			next if @names==1;
+		}
+		next unless @names;
+		my $group=eval { Gtk4::SizeGroup->new($vertical ? 'vertical' : 'horizontal') }
+			or next;
+		for my $name (@names)
+		{	my $widget=$self->{widgets}{$name};
+			# an unknown name is recorded rather than warned about, since the
+			# renderer has no diagnostics channel of its own
+			if ($widget) { $group->add_widget($widget) }
+			else { push @{$self->{unhandled_sizegroups}{$key}},$name }
+		}
+		push @{$self->{size_groups}},$group;
+	}
 }
 
 # The layout-wide presentation globals, which legacy InitLayout reads into
@@ -193,6 +239,14 @@ sub UnhandledGlobals
 {	return $_[0]{unhandled_globals};
 }
 
+# Names a size group referred to that no widget or container carries, by group
+# name. Legacy warns "Can't add unknown widget '$n' to sizegroup"
+# (gmusicbrowser_layout.pm:1068); the renderer records it instead, since it has
+# no diagnostics channel of its own.
+sub UnhandledSizeGroups
+{	return $_[0]{unhandled_sizegroups};
+}
+
 sub Destroy
 {	my $self=shift;
 	$self->{frontend}->Unsubscribe($_) for @{$self->{subscriptions}};
@@ -205,7 +259,10 @@ sub Destroy
 	$self->{widgets}={};
 	$self->{unhandled}={};
 	delete $self->{unhandled_globals};
+	delete $self->{unhandled_sizegroups};
 	delete $self->{globals};
+	# a size group holds references to its widgets, so it must go with them
+	delete $self->{size_groups};
 	# the style provider is installed on the display, so it outlives the widget
 	# tree unless it is taken off again
 	if (my $provider=delete $self->{style_provider})

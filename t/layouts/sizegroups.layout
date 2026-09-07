@@ -1,0 +1,9 @@
+[gtk4 sizegroups]
+Type=G
+VBroot= HBrow VBcol
+HBrow= Text(text="s") Text2(text="a much much longer label") Text3(text="ungrouped but long too")
+VBcol= Text4(text="x") Text5(text="y") Text6(text="a considerably wider label here")
+HSize0= Text Text2
+VSize0= 40 Text4
+HSize1= 120 Text5 Text6
+HSize2= Text3 Nonexistent
