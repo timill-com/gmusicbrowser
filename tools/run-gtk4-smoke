@@ -48,4 +48,4 @@ else
 	gmb_status=$?
 	exit "$gmb_status"
 fi
-timeout 30s prove --norc -I. t/gtk4/00_Binding.t t/gtk4/10_ProofOfLife.t t/gtk4/20_Paned.t t/gtk4/30_Box.t t/gtk4/40_Icons.t
+timeout 30s prove --norc -I. t/gtk4/00_Binding.t t/gtk4/10_ProofOfLife.t t/gtk4/20_Paned.t t/gtk4/30_Box.t t/gtk4/40_Icons.t t/gtk4/50_Input.t

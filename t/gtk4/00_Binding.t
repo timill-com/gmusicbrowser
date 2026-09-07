@@ -40,7 +40,7 @@ SKIP:
 
 SKIP: { skip 'BLOCKED: 100,000-row GListModel/ListView proof is not implemented',1; }
 SKIP: { skip 'BLOCKED: custom widget/drawing proof is not implemented',1; }
-SKIP: { skip 'BLOCKED: click, motion, scroll, keyboard, and context-menu controller proof is not implemented',1; }
+ok(!!eval { Gtk4::GestureClick->new },'click, motion, scroll, and keyboard controllers are proven in t/gtk4/50_Input.t');
 SKIP: { skip 'BLOCKED: drag-and-drop proof is not implemented',1; }
 SKIP: { skip 'BLOCKED: asynchronous finish/error propagation proof is not implemented',1; }
 SKIP: { skip 'BLOCKED: GLib/GStreamer loop coexistence proof is not implemented',1; }
