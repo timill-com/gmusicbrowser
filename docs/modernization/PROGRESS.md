@@ -87,6 +87,47 @@ renderer had already built was wrong until they landed. That pattern — a legac
 `@default_options` value whose GTK4 counterpart differs — has found four of the
 last eight increments and is still the highest-value thing to look for.
 
+## The route to a full port, in dependency order
+
+Measured 2026-09-07. The remaining **926** instances cluster into four groups,
+and the order below is set by what blocks what, not by size.
+
+| group | instances | blocked on |
+|---|---:|---|
+| menus (`MenuItem` 99, `SeparatorMenuItem` 30, the `*Item` families) | 206 | pointer input, then a `GMenu`/`PopoverMenu` design decision |
+| list/model (`FilterPane` 63, `SimpleSearch` 30, `SongList` 22, `SongTree` 19, `QueueList` 17, …) | 173 | the 100k-row `GListModel` probe, and D010 |
+| song-field labels (`Title` 27, `Album` 26, `Artist` 25, `Total` 26, `Time` 13, …) | 157 | a `FRONTEND_CONTRACT.md` extension, and a fixture song source |
+| everything else (`ToggleButton` 35, `Cover` 26, `Sort` 21, `TimeBar` 20, …) | 390 | mostly pointer input and the show/hide subsystem |
+
+**The sequencing lesson so far: M1's exit gate is unmet while M4/M5 widget work
+has been proceeding.** That is why input came first. Four probes are still
+BLOCKED, and each gates a group above:
+
+1. ~~input controllers~~ — **closed**, `t/gtk4/50_Input.t`. It was the correct
+   first move because it is the only probe every other group depends on: menus
+   open by pointer, lists select by pointer, `ToggleButton` and
+   `LockAlbum`/`LockArtist` need click plus hover. It also unblocks the *parity
+   ratchet* — `PARITY_CHECKLIST.md` says no row reaches `Parity review` without
+   pointer and keyboard evidence, so before this **no widget could ever be
+   marked done**, however many rendered.
+2. **100k-row `GListModel`/`ListView`** — gates the entire 173-instance list
+   group and is the largest single unknown left. D010 (SongTree architecture)
+   cannot be resolved without it.
+3. **custom drawing** — gates the SongTree skin layer. Partly answered already:
+   D006 records that layout vfunc overrides are silently ignored, so the answer
+   is likely "compose, do not subclass", as `AB` did under D030.
+4. **drag and drop**, **async finish/error**, **GStreamer loop coexistence** —
+   independent of the layout surface; needed for the gate, not for widgets.
+
+Two things need a **decision from the user**, not just code, and neither is
+blocked by the probes:
+
+- extending `FRONTEND_CONTRACT.md`, which is frozen for the first slice. It can
+  say *which* song is current but cannot resolve an ID to field values. Until
+  that is settled the 157-instance label group cannot start.
+- the `GMenu`/`PopoverMenu` model for menus, which is a genuine design change
+  rather than an API swap.
+
 ## The bottleneck, and what unblocks it
 
 **The song-field state path is the single gate on most of what remains.** It is
@@ -125,11 +166,11 @@ The next unimplemented elements by instance count, for scale:
 | suite | result | notes |
 |---|---|---|
 | `make test-modernization` | 484 assertions, 0 skips | offline, in-process doubles |
-| `make test-gtk4` | 346 TAP = 340 executed + 6 skips | real Wayland; skips are pre-existing M1 probes |
+| `make test-gtk4` | 373 TAP = 368 executed + 5 skips | real Wayland; 4 M1 probes still BLOCKED |
 | `make test-gtk3` | 1 assertion | startup/shutdown on real Wayland |
 
-Per file for `make test-gtk4`: 18 binding (holding all 6 skips), 4
-proof-of-life, 84 pane, 166 box, 74 icon. Count skips from `prove -v`, never
+Per file for `make test-gtk4`: 18 binding (holding all 5 skips), 4
+proof-of-life, 84 pane, 166 box, 74 icon, 27 input. Count skips from `prove -v`, never
 by subtraction. Two GTK `Failed to set text ... from markup` warnings are
 expected, one per refused value in `t/layouts/markup.layout`.
 

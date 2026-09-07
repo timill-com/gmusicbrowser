@@ -27,7 +27,7 @@ Statuses used here are **Not started**, **Boundary work**, **GTK4 in progress**,
 | Command and state boundary drives the proof widgets | GTK4 in progress | Contract and GUI proof passed |
 | 100,000-row modern list/model probe | Boundary work | Timing and memory record |
 | Custom drawing/widget probe | Boundary work | Render and lifecycle test |
-| Click, motion, scroll, keyboard, menu, and DnD controllers | Boundary work | Interaction results |
+| Click, motion, scroll, keyboard, and menu controllers | GTK4 in progress | `t/gtk4/50_Input.t` passed on real Wayland; DnD still separate |
 | GStreamer bus and GTK4 GLib-loop coexistence | Boundary work | Deterministic bus test |
 | Reproducible package contains Perl binding and typelibs | Not started | Clean package build and run |
 | GTK3 regression path remains operational | GTK4 in progress | `make test-gtk3` startup/shutdown passed on real Wayland; acceptance warnings remain |

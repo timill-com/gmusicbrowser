@@ -1,7 +1,9 @@
 # Session handoff
 
-Status: the tree is clean. The most recent session did **one** increment, a
-parser correctness fix (**D035**), after re-verifying the whole baseline.
+Status: the tree is clean. The most recent session did **two** increments after
+re-verifying the whole baseline: a parser correctness fix (**D035**) and the
+**M1 input-controller probe**, which closed a gate row that had been blocking
+every other group of work.
 
 ## Most recent session: the `FB` packing prefix (D035)
 
@@ -69,6 +71,47 @@ because the contract can say *which* song is current (`CurSong` emits
 `{id=>...}`) but has no way to resolve an ID to field values. It also needs a
 fixture song source, since `gmusicbrowser_gtk4.pl` has no library at all. Scope
 it with the user before writing code.
+
+## Most recent session, second increment: the M1 input-controller probe
+
+`t/gtk4/50_Input.t`, 27 assertions. Chosen over the bigger rendering groups
+because it was the only blocked probe that **every** other group depends on,
+and because of a consequence that had gone unstated: `PARITY_CHECKLIST.md`
+requires pointer and keyboard evidence before any row reaches `Parity review`,
+so with zero event controllers in the renderer **no widget could ever be marked
+done** regardless of how many rendered. That is why the checklist had no row at
+parity.
+
+Result: the binding carries the whole legacy input surface. Click, motion,
+scroll, and key controllers construct and fire with correct payloads. Full
+detail is in D006; the three findings that constrain a port:
+
+- **`GdkEvent` is unmarshallable** (`get_current_event` dies), so a handler's
+  own arguments are the entire payload. **Inside a signal handler Glib swallows
+  the error and prints to stderr**, so an assertion written there passes without
+  ever seeing the failure — I hit exactly that, and moved the check outside the
+  handler where `eval` can catch it.
+- **A synthetic press reports button 0** however the gesture is filtered, so a
+  port needs **one gesture per button** via `set_button`, matching the legacy
+  `'click'.$event->button` contract at `gmusicbrowser_layout.pm:1284`.
+- **Baseline controller counts differ by widget type** (box 0, label 1, button
+  3), so a test must identify a controller, never count them.
+
+**This probe passes identically on a pristine tree, and that is stated in the
+commit rather than glossed.** It tests the binding, not project code, so there
+is no old implementation for it to fail against; its value is the measurement.
+Do not read its "passes on both trees" as a weak test — read it as the reason
+the usual pristine-discrimination rule does not apply to gate probes.
+
+`t/gtk4/00_Binding.t`'s input skip became a real assertion, so the suite is now
+**373 TAP = 368 executed + 5 skips** (was 346 = 340 + 6). Four M1 probes remain
+BLOCKED: 100k-row `GListModel`, custom drawing, drag and drop, async
+finish/error, and GStreamer loop coexistence.
+
+**`PROGRESS.md` now carries a dependency-ordered route for the rest of the
+port** — the four remaining widget groups, which probe gates each, and the two
+things that need a user decision rather than code (extending the frozen
+`FRONTEND_CONTRACT.md`, and the `GMenu`/`PopoverMenu` model).
 
 ## Earlier session: three increments and a progress overview
 

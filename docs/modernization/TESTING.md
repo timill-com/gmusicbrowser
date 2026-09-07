@@ -52,8 +52,10 @@ the same command outside it passed on the real Wayland connection. The two
 original test files reported 22 TAP results: 16 executed assertions passed and
 six feasibility probes were explicitly skipped. This replaces the temporary
 archive setup recorded on 2026-09-06, whose reported total also included those
-six skips. A pinned, reproducible package and the remaining M1 probes are still
-required.
+six skips. As of the input-controller probe the suite reports **373 TAP = 368
+executed + 5 skips** (18 binding, 4 proof-of-life, 84 pane, 166 box, 74 icon,
+27 input), counted from `prove -v`. A pinned, reproducible package and the four
+remaining M1 probes are still required.
 
 The run emits `Too late to run INIT block` from the introspection module and
 `Unable to acquire session bus` because the runner unsets the session bus.
@@ -79,15 +81,18 @@ before [move-handle](https://docs.gtk.org/gtk4/signal.Paned.move-handle.html).
 `AB`, label alignment, and label styling coverage. On 2026-09-07, after the
 `HSize`/`VSize` size groups, the full
 `make test-gtk4` run reported 346 TAP results: 340 executed assertions passed
-and the same six feasibility probes were skipped, 0 failures. The skips were
-counted from `prove -v` and are the same six M1 probes as before. Running
+and six feasibility probes were skipped, 0 failures. After the
+input-controller probe the same command reports **373 TAP = 368 executed + 5
+skips**, one probe having become a real assertion. The skips were
+counted from `prove -v`, never by subtraction. Running
 totals for the same command: 173 results before `Next`/`Prev`, 184 after it,
 202 after `Filler`, 216 after the `AB` alignment coverage, 246 after
 `size=`/`relief=`, 258 after label alignment, 261 after the `ellipsize=1`
 normalisation, 287 after the `AB` constraint layout, 304 after the label
 `font=`/`color=` CSS, 323 after the inheritance, 337 after the static
-`markup=`, 346 after the size groups. Per file: 18 binding, which is
-where all six skips live, 4 proof-of-life, 84 pane, 166 box, 74 icon. The
+`markup=`, 346 after the size groups, 373 after the input probe. Per file: 18
+binding, which is where all five remaining skips live, 4 proof-of-life, 84
+pane, 166 box, 74 icon, 27 input. The
 per-file figures were measured by running each file alone, not by subtraction.
 
 **Two GTK `Failed to set text ... from markup` warnings are expected** in this
@@ -377,6 +382,32 @@ because D022 makes stock GNOME a required target.
 With `icon_path` omitted or pointing at a missing directory, rendering still
 succeeds: standard names resolve, bundled names return nothing and the widget
 keeps its text label.
+
+## The M1 input-controller probe
+
+`t/gtk4/50_Input.t`, 27 assertions on real Wayland. It is a **feasibility
+probe**, and that changes how to read it: it exercises the GTK4 binding rather
+than project code, so it passes identically on a pristine tree. The
+"new tests must fail against the old implementation" rule applies to ported
+behaviour; a gate probe's worth is the measurement it records. Stating that is
+better than implying a discrimination it does not have.
+
+Three traps it hit, all of the vacuous-assertion family:
+
+- **An exception inside a signal handler is swallowed by Glib.**
+  `get_current_event` dies with an unmarshallable-`GdkEvent` error, but inside
+  a handler Glib catches it, prints `unhandled exception in callback` to
+  stderr, and continues — so `eval` there succeeds and the assertion passes
+  without ever seeing the failure. It also polluted the suite output. The check
+  belongs **outside** the handler, where the exception is catchable.
+- **Counting a widget's controllers is not a stable observable.** A
+  `Gtk4::Box` starts with 0, a `Gtk4::Label` with 1, a `Gtk4::Button` with 3.
+  An assertion on a count passes or fails for the wrong reason depending on the
+  widget type; assert on identity, or on a delta across a known operation.
+- **A synthetic press has no GDK event behind it**, so `get_current_button`
+  reads 0 even when `set_button(3)` reads back as 3. Asserting the button
+  number from the event would have been vacuous, and would also have encoded
+  the wrong port design.
 
 ## The `FB` packing prefix
 

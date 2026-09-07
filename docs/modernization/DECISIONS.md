@@ -286,6 +286,35 @@ Evidence recorded so far, against the system
   `set_scrollable`, `set_tab_pos`, `popup_enable`, and
   `set_tab_reorderable` all work. So the legacy `TB` container is portable;
   `NB` is gated on `Layout::NoteBook`'s own subsystem, not on the binding.
+- **Event controllers work, and the whole legacy input surface is carried.**
+  `Gtk4::GestureClick`, `GestureSingle`, `GestureDrag`, `GestureLongPress`,
+  `EventControllerKey`, `EventControllerMotion`, `EventControllerFocus`,
+  `ShortcutController`, `DragSource`, `Popover` and `PopoverMenu` all construct;
+  click, scroll, and key controllers all **fire** with correct payloads in a
+  mapped Wayland window. `EventControllerScroll->new` requires scroll flags and
+  `DropTarget->new` a type plus actions, in the same way as `Gtk4::Constraint`.
+  `add_controller`, `observe_controllers` and `remove_controller` all work, the
+  last mattering for a renderer `Destroy`. This closes the M1 gate row; see
+  `t/gtk4/50_Input.t`.
+- **`GdkEvent` is not marshallable, like the graphene types.**
+  `GestureClick->get_current_event` dies with `interface_to_sv: Don't know how
+  to handle fundamental type GdkEvent (200)`. **Inside a signal handler Glib
+  catches that and prints `unhandled exception in callback` to stderr**, so an
+  `eval` there succeeds and an assertion written inside a handler passes without
+  ever seeing the failure — probe it outside one. Consequence for any port: a
+  handler's own arguments are the entire available payload.
+- **A synthetic `pressed` reports button 0 however the gesture is filtered.**
+  `set_button(3)` reads back as 3 through `get_button`, but
+  `get_current_button` returns 0 under `signal_emit` because no GDK event backs
+  it. The legacy contract keys actions on the button number
+  (`gmusicbrowser_layout.pm:1284`), so a port must register **one gesture per
+  button** and let GTK do the filtering, rather than one gesture that inspects
+  the event. That is also the only shape a test can drive.
+- **Baseline controller counts differ by widget type**: `Gtk4::Box` has 0,
+  `Gtk4::Label` 1 (a `ShortcutController`), `Gtk4::Button` 3 (a key controller,
+  a click gesture, and a shortcut controller). An assertion counting a widget's
+  controllers therefore passes or fails for the wrong reason depending on the
+  widget; identify a controller instead of counting.
 - **`Gtk4::Fixed` covers only the static half of the legacy `FB`.** Both
   bundled `FB` uses are the fractional form (`.1,0,.8,0`), whose dynamic
   position and size are computed in `SFixed`'s `size_allocate` override
