@@ -38,9 +38,10 @@ surface. Numeric suffixes retain the base element's behaviour.
 
 | Elements | GTK4 status |
 |---|---|
-| `Label`, `Play`, `Quit` | GTK4 in progress |
+| `Label`, `Play`, `Quit`, `Stop` | GTK4 in progress |
 | Icon options (`icon=`, `stock=`) on the above | GTK4 in progress, see D023 |
-| `AABox`, `AASearch`, `AddLabelEntry`, `Album`, `AlbumBox`, `AlbumSearch`, `Artist`, `ArtistBox`, `ArtistPic`, `ArtistSearch`, `BContext`, `Button`, `Choose`, `ChooseRandAlbum`, `Comment`, `Connections`, `Context`, `Cover`, `Date`, `EditList`, `EditListButtons`, `EmptyList`, `Equalizer`, `EqualizerPresets`, `EqualizerPresetsSimple`, `EventBox`, `FBox`, `FLock`, `FPane`, `Filler`, `Filter`, `FilterBox`, `FilterLock`, `FilterPane`, `Fullscreen`, `HSeparator`, `HistItem`, `LSortItem`, `LabelTime`, `LabelToggleButtons`, `LabelVol`, `LabelsIcons`, `LayoutItem`, `Length`, `Lock`, `LockAlbum`, `LockArtist`, `LockSong`, `MainMenuItem`, `MenuItem`, `Next`, `OpenBrowser`, `OpenContext`, `OpenQueue`, `PFilterItem`, `PSortItem`, `PictureBrowser`, `PlayFilter`, `PlayItem`, `PlayList`, `PlayOrderCombo`, `PlayingTime`, `Pos`, `Pref`, `Progress`, `ProgressV`, `Queue`, `QueueActions`, `QueueFilter`, `QueueItem`, `QueueList`, `Refresh`, `Repeat`, `ResetFilter`, `Scale`, `SeparatorMenuItem`, `ShuffleList`, `SimpleSearch`, `SongInfo`, `SongList`, `SongSearch`, `SongTree`, `Sort`, `Stars`, `Stop`, `TabbedLists`, `Text`, `Time`, `TimeBar`, `TimeSlider`, `Title`, `Title_by`, `TogButton`, `ToggleButton`, `Total`, `VProgress`, `VSeparator`, `Visuals`, `Vol`, `VolBar`, `VolSlider`, `Volume`, `VolumeBar`, `VolumeIcon`, `VolumeSlider`, `Year` | Not started |
+| `tip=` tooltip option on the above | GTK4 in progress, literal tips only |
+| `AABox`, `AASearch`, `AddLabelEntry`, `Album`, `AlbumBox`, `AlbumSearch`, `Artist`, `ArtistBox`, `ArtistPic`, `ArtistSearch`, `BContext`, `Button`, `Choose`, `ChooseRandAlbum`, `Comment`, `Connections`, `Context`, `Cover`, `Date`, `EditList`, `EditListButtons`, `EmptyList`, `Equalizer`, `EqualizerPresets`, `EqualizerPresetsSimple`, `EventBox`, `FBox`, `FLock`, `FPane`, `Filler`, `Filter`, `FilterBox`, `FilterLock`, `FilterPane`, `Fullscreen`, `HSeparator`, `HistItem`, `LSortItem`, `LabelTime`, `LabelToggleButtons`, `LabelVol`, `LabelsIcons`, `LayoutItem`, `Length`, `Lock`, `LockAlbum`, `LockArtist`, `LockSong`, `MainMenuItem`, `MenuItem`, `Next`, `OpenBrowser`, `OpenContext`, `OpenQueue`, `PFilterItem`, `PSortItem`, `PictureBrowser`, `PlayFilter`, `PlayItem`, `PlayList`, `PlayOrderCombo`, `PlayingTime`, `Pos`, `Pref`, `Progress`, `ProgressV`, `Queue`, `QueueActions`, `QueueFilter`, `QueueItem`, `QueueList`, `Refresh`, `Repeat`, `ResetFilter`, `Scale`, `SeparatorMenuItem`, `ShuffleList`, `SimpleSearch`, `SongInfo`, `SongList`, `SongSearch`, `SongTree`, `Sort`, `Stars`, `TabbedLists`, `Text`, `Time`, `TimeBar`, `TimeSlider`, `Title`, `Title_by`, `TogButton`, `ToggleButton`, `Total`, `VProgress`, `VSeparator`, `Visuals`, `Vol`, `VolBar`, `VolSlider`, `Volume`, `VolumeBar`, `VolumeIcon`, `VolumeSlider`, `Year` | Not started |
 
 | Container prefix | Legacy meaning | GTK4 status |
 |---|---|---|
@@ -86,9 +87,26 @@ Adwaita. Only `Play` and `Quit` accept icons so far; the remaining
 99 `icon=` and 17 `stock=` uses in bundled layouts belong to widgets that are
 not implemented yet. Icon artwork is unchanged, so this stays inside D013.
 
+Stateless command buttons are built from a `%Buttons` table in the renderer
+that keeps the field names `%Layout::Widgets` uses, so the two can be compared
+directly. `Stop` is the first entry. Only commands the audited bridge already
+exposes may be added: a widget whose command is unregistered would build and
+then fail on click. The table deliberately omits `click2`/`click3` secondary
+mouse actions, because pointer input is not ported and half-wiring them would
+be worse than dropping them. `tip=` becomes `set_tooltip_text` with `\n`
+unescaped, matching `gmusicbrowser_layout.pm:1207`; song-field tips and
+coderef state tips are not handled.
+
+Not covered for `Stop`: `click2` (`EnqueueAction(stop)`) and `click3`
+(`SetNextAction(stop)`), pointer and keyboard activation, focus order, and
+accessibility. Activation is proven by emitting `clicked`, which is the signal
+a real click raises, not by synthesising pointer input.
+
 Icon sizes and states are still unhandled: `size=button`, `size=large-toolbar`,
 `size=menu`, `relief=none`, and the two-state `stock="on:... off:..."` form used
-by `LockAlbum`/`LockArtist`. The 28 bundled `gmb-*` names remain app-supplied
+by `LockAlbum`/`LockArtist`. Note that legacy `Layout::Button` defaults are
+`relief=>'none'` and `size=>SIZE_BUTTONS` (`large-toolbar`), so these are the
+default for every button widget rather than rare options. The 28 bundled `gmb-*` names remain app-supplied
 artwork and do not follow the host theme; mapping them to freedesktop names is
 deferred by D023 alternative 2 and has not been proposed for acceptance.
 
@@ -105,9 +123,12 @@ against the GTK3 parser is available.
 
 ## Commands
 
-`PlayPause` is **GTK4 in progress** in the proof slice. `Play`, `Pause`, `Stop`,
-`IncVolume`, `DecVolume`, and `TogMute` are exposed by the audited production
-bridge but do not yet have GTK4 interaction parity. `Quit` is a frontend
+`PlayPause` and `Stop` are **GTK4 in progress** in the proof slice. `Play`,
+`Pause`, `IncVolume`, `DecVolume`, and `TogMute` are exposed by the audited
+production bridge but have no GTK4 widget yet.
+`NextSong` and `PrevSong` exist in the core `%Command` table but are **not** in
+the legacy bridge's audited command list, so the `Next` and `Prev` widgets
+cannot be ported without extending that shared boundary. `Quit` is a frontend
 lifecycle operation rather than a core command. Every other legacy command
 below is **Not started** for GTK4 routing and behavioural comparison:
 

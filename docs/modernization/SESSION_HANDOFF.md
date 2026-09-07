@@ -1,7 +1,7 @@
 # Session handoff
 
-Status: uncommitted work in the tree, GTK4 icon resolution given a `-symbolic`
-fallback; several earlier verification claims corrected after re-measurement
+Status: `-symbolic` icon fallback committed as `978bbdf`; the `Stop` widget and
+a `%Buttons` table for stateless command buttons are uncommitted in the tree
 
 Last session: 2026-09-07. Branch `gtk4-alpha`.
 
@@ -31,17 +31,11 @@ claimed that work was uncommitted and listed a `git status` that no longer
 applies; that listing has been removed rather than corrected, because it
 described a tree state that no longer exists.
 
-This session's changes are uncommitted:
+The `-symbolic` fallback and the verification corrections below are committed
+as `978bbdf`. Uncommitted on top of it is the `Stop` widget increment.
 
-	M docs/modernization/DECISIONS.md
-	M docs/modernization/PARITY_CHECKLIST.md
-	M docs/modernization/SESSION_HANDOFF.md
-	M docs/modernization/TESTING.md
-	M gmusicbrowser_gtk4_layout.pm
-	M t/gtk4/40_Icons.t
-
-No GTK3 production code, bundled layout, or file in `pix/` was touched. No file
-was added or removed.
+No GTK3 production code, bundled layout, or file in `pix/` has been touched in
+either. `t/layouts/buttons.layout` is the only added file.
 
 ## Renderer container state, carried forward
 
@@ -89,6 +83,53 @@ Recorded as D024, status **Proposed**.
 Why this is inside D013: it changes no artwork, adds and removes no file, and
 changes no layout-visible name. It repairs resolution of infrastructure GTK4
 removed, which is the same ground D023 stands on. It is not a restyling.
+
+## Latest increment: the first stateless command button
+
+`Stop` is now rendered, as the first entry in a `%Buttons` table in
+`gmusicbrowser_gtk4_layout.pm`. The table keeps the field names
+`%Layout::Widgets` uses in `gmusicbrowser_layout.pm:60`, so the GTK4 and GTK3
+definitions can be diffed by eye. `_CreateButton` builds it and `_SetTip`
+applies tooltips; neither `Play` nor `Quit` changed behaviour.
+
+Why `Stop` specifically, and nothing else in the same batch: the audited legacy
+bridge registers only `Play PlayPause Pause Stop IncVolume DecVolume TogMute`
+(`gmusicbrowser_frontend_legacy.pm:15`). `Stop` is the **only** simple
+transport button whose command is already reachable. `Next` (17 uses in bundled
+layouts) and `Prev` (10) map to `NextSong`/`PrevSong`, which exist in the core
+`%Command` table at `gmusicbrowser.pl:1624-1625` but are **not** in the
+bridge's list. Porting them means widening a shared boundary, which needs its
+own GTK3 regression pass, so it was deliberately left out rather than bundled
+in.
+
+Design points worth keeping:
+
+- Adding a widget whose command is not registered would build fine and fail on
+  click. The table is therefore restricted to bridge-exposed commands.
+- `click2`/`click3` are omitted on purpose. `Stop` has
+  `click2 => 'EnqueueAction(stop)'` and `click3 => 'SetNextAction(stop)'` in
+  GTK3, but pointer input is not ported, and half-wiring them would be worse
+  than dropping them. They are recorded as not covered.
+- The authoritative icon option for `Layout::Button` is `stock`, not `icon`.
+  `_SetIcon` accepts both, which is a superset and harmless, but the widget
+  default is supplied as `stock`.
+- The renderer takes every user-visible string from the caller's `labels`,
+  which is why the table names its tooltip (`tip => 'stop'`) instead of
+  embedding English. That convention is what keeps this module free of the
+  `_"..."` idiom that makes `gmusicbrowser_layout.pm` non-compilable alone.
+  The constructor now rejects a `labels` hash missing any `%Buttons` tooltip,
+  so a mute button fails loudly instead of rendering blank. Nine call sites in
+  four test files plus `gmusicbrowser_gtk4.pl` were updated to pass `stop`.
+- Legacy `Layout::Button` defaults are `relief => 'none'` and
+  `size => SIZE_BUTTONS` (`large-toolbar`). Those still are not implemented,
+  but they are the *default* for every button, not rare options, so they matter
+  more than the parity checklist implied.
+
+One regression the doubles caught: giving `%Buttons` a default `stock` made
+every button consult the icon theme, where previously only a layout-supplied
+icon did. The offline doubles have no `Gtk4::Gdk::Display::get_default` at all,
+so `_IconTheme` now wraps the display lookup in `eval` — the subroutine is
+absent, not merely empty, when the renderer runs without a real binding.
 
 ## Why the recommended increment was NOT done
 
@@ -153,11 +194,13 @@ No row was advanced to `Parity review`. Real allocation and action signals are
 not sufficient for complete input, focus, accessibility, and saved-profile
 parity. `AGENTS.md` forbids reporting a skipped or reasoned-about test as a pass.
 
-The icon assertions added this session are also behaviour, not construction.
-Against the previous `_IconName`, `t/gtk4/40_Icons.t` fails 2 assertions,
-returning `application-exit` and `view-refresh` where Adwaita can render only
-the symbolic spellings. Confirmed by running the new test against a scratch
-copy of the tree carrying the old resolver.
+The icon assertions are behaviour, not construction. Against the previous
+`_IconName`, `t/gtk4/40_Icons.t` fails 2 assertions, returning
+`application-exit` and `view-refresh` where Adwaita can render only the
+symbolic spellings. The `Stop` assertions likewise cannot pass against the
+previous renderer: both test files die with
+`GTK4 widget 'Stop' is not implemented`. Both were confirmed against a
+pristine `git archive` of the preceding commit.
 
 Commands that were actually run and passed this session:
 
@@ -169,13 +212,12 @@ Commands that were actually run and passed this session:
 	make test-gtk4
 	git diff --check
 
-`make test-modernization`: 261 executed assertions passed, no skips. Unchanged
-by this session; the renderer doubles never reach a real icon theme.
+`make test-modernization`: 269 executed assertions passed, no skips.
 
-`make test-gtk4` on the real Wayland connection: 167 TAP results, comprising
-161 executed assertions passed and the same six pre-existing feasibility
-probes skipped, 0 failures. That is 84 pane, 34 box, and 27 icon assertions
-plus the binding and proof-of-life files. Do not restate this as 167 passing
+`make test-gtk4` on the real Wayland connection: 173 TAP results, comprising
+167 executed assertions passed and the same six pre-existing feasibility
+probes skipped, 0 failures. That is 84 pane, 34 box, and 33 icon assertions
+plus the binding and proof-of-life files. Do not restate this as 173 passing
 assertions. The six skips were counted from `prove -v` output, not assumed, and
 they are the same six M1 probes as before: the icon test's own theme-premise
 guards did not fire on this host, so all three symbolic assertions executed.
@@ -393,6 +435,13 @@ means the reported ~1190px window is not the layout's designed size.
 - Do not hard-code a full-colour freedesktop name in a test expectation.
   Adwaita ships many action icons only as `-symbolic`, so a bare
   `application-exit` expectation fails there even though resolution is correct.
+- `Gtk4::Button->activate` does not fire a button's `clicked` handler in a
+  test: it needs a mapped, focusable widget and silently leaves the command
+  undispatched. Emit `clicked` instead, which is the signal a real click
+  raises, as `t/gtk4/20_Paned.t` does for its action signals.
+- The offline renderer doubles have no GDK display at all, so anything the
+  renderer newly reads from the icon theme must tolerate the lookup
+  subroutine being absent rather than just returning nothing.
 - GTK3 with `-cmd` and no `Net::DBus` exits 2 at `gmusicbrowser.pl:512`, and
   with `-nodbus` it hangs past `timeout` and must be `pkill`ed. Budget for
   cleaning up stray `gmusicbrowser.pl` processes if you try either.

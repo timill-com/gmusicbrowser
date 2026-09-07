@@ -85,7 +85,7 @@ sub _render
 	my $renderer=Layout::Renderer::Gtk4->new
 	( catalog=>_catalog($orientation,$size,$packing),
 	  frontend=>$frontend,
-	  labels=>{play=>'Play',pause=>'Pause',quit=>'Quit'},
+	  labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
 	);
 	my $paned=$renderer->Render('gtk4 containers');
 	$paned->set_direction('ltr');

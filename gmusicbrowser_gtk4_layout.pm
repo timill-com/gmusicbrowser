@@ -34,6 +34,21 @@ my %StockNames=
 	'gtk-zoom-in'	=> 'zoom-in',
 );
 
+# Stateless command buttons, keeping the field names %Layout::Widgets uses so
+# the two tables can be compared directly. Only commands the audited production
+# bridge already exposes belong here: an unregistered one would build and then
+# fail on click. Stateful buttons need a state getter and an event
+# subscription, so Play is not in here. 'click2'/'click3' are omitted because
+# pointer input is not ported. 'tip' names a caller-supplied label rather than
+# holding text, which keeps this module free of the _"..." gettext idiom.
+my %Buttons=
+(	Stop =>
+	{	stock	=> 'gtk-media-stop',
+		tip	=> 'stop',
+		command	=> 'Stop',
+	},
+);
+
 # the bundled aliases that have no file of their own, from %IconsFallbacks in
 # gmusicbrowser.pl
 my %IconFallbacks=
@@ -58,6 +73,11 @@ sub new
 	die "GTK4 layout renderer needs labels\n"
 		unless ref $labels eq 'HASH' && defined $labels->{play} &&
 		defined $labels->{pause} && defined $labels->{quit};
+	# Every %Buttons tooltip must be supplied, or the button would render with
+	# neither an icon-theme fallback label nor a tooltip on a host whose theme
+	# lacks the icon.
+	die "GTK4 layout renderer needs the '$Buttons{$_}{tip}' label\n"
+		for grep !defined $labels->{$Buttons{$_}{tip}}, sort keys %Buttons;
 	return bless
 	{ catalog	=> $catalog,
 	  frontend	=> $frontend,
@@ -324,8 +344,13 @@ sub _IconTheme
 {	my $self=shift;
 	return $self->{icon_theme} if exists $self->{icon_theme};
 	$self->{icon_theme}=undef;
-	my $display=Gtk4::Gdk::Display::get_default() or return;
-	my $theme=Gtk4::IconTheme::get_for_display($display) or return;
+	# No display means no icon theme, and every icon then resolves to nothing so
+	# widgets keep their text. Wrapped because the lookup itself is absent, not
+	# merely empty, when the renderer is driven without a real binding.
+	my $theme=eval
+	{	my $display=Gtk4::Gdk::Display::get_default() or return;
+		Gtk4::IconTheme::get_for_display($display);
+	} or return;
 	if (defined $self->{icon_path} && -d $self->{icon_path})
 	{	$theme->add_search_path($self->{icon_path});
 	}
@@ -372,10 +397,49 @@ sub _CreateWidget
 			warn "$result->{error}\n" unless $result->{ok};
 		});
 	}
+	elsif (my $button=$Buttons{$element})
+	{	$widget=$self->_CreateButton($node,$button);
+	}
 	else
 	{	die _source($node).": GTK4 widget '$element' is not implemented\n"; }
+	$self->_SetTip($widget,$node,$Buttons{$element});
 	$self->{widgets}{$node->{name}}=$widget;
 	return $widget;
+}
+
+# A stateless button: one command, an icon from the widget's default 'stock'
+# unless the layout names its own, and a text label only when no icon resolves.
+sub _CreateButton
+{	my ($self,$node,$def)=@_;
+	my $values=$node->{options}{values};
+	my $widget=Gtk4::Button->new;
+	# the layout's own icon= or stock= wins over the widget's default, matching
+	# how %$opt overrides @default_options in legacy Layout::Button
+	my %icon=%$values;
+	$icon{stock}=$def->{stock} unless defined $icon{icon} || defined $icon{stock};
+	my $name=$self->_SetIcon($widget,\%icon);
+	# a button with no usable icon must still be operable, so fall back to text
+	unless (defined $name)
+	{	my $text= defined $values->{text} ? $values->{text}
+			: $self->{labels}{$def->{tip}};
+		$widget->set_label($text) if defined $text;
+	}
+	$widget->signal_connect(clicked => sub
+	{	my $result=$self->{frontend}->Dispatch($def->{command},undef,$self->{context});
+		warn "$result->{error}\n" unless $result->{ok};
+	});
+	return $widget;
+}
+
+# The legacy tip option is a literal tooltip once '\n' is unescaped. A tip
+# containing song fields is state-dependent and is not handled here.
+sub _SetTip
+{	my ($self,$widget,$node,$def)=@_;
+	my $tip=$node->{options}{values}{tip};
+	$tip=$self->{labels}{$def->{tip}} if !defined $tip && $def && defined $def->{tip};
+	return unless defined $tip && $tip ne '';
+	$tip=~s#\\n#\n#g;
+	$widget->set_tooltip_text($tip);
 }
 
 # legacy layouts name an icon with either 'icon' or 'stock'

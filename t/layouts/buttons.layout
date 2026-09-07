@@ -1,0 +1,3 @@
+[gtk4 buttons]
+Type=G
+VBroot= Stop Stop2(tip="Custom tip") Stop3(stock=gmb-random) Play Quit

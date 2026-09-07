@@ -44,7 +44,7 @@ $frontend=GMB::Frontend->new
 my $renderer=Layout::Renderer::Gtk4->new
 (	catalog=>$catalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit'},
+	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
 	icon_path=>'pix',
 );
 $renderer->Render('gtk4 icons');
@@ -115,7 +115,7 @@ for my $name (qw/Play Play2 Quit2/)
 	my $probe=Layout::Renderer::Gtk4->new
 	(	catalog=>$catalog,
 		frontend=>$frontend,
-		labels=>{play=>'Play',pause=>'Pause',quit=>'Quit'},
+		labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
 		icon_path=>'pix',
 	);
 	$probe->{icon_theme}=$adwaita;
@@ -157,5 +157,43 @@ for my $name (qw/Play Play2 Quit2/)
 }
 
 $renderer->Destroy;
+
+# A %Buttons widget takes its icon from the table's default 'stock', so on a
+# real theme it must show an icon rather than the text fallback the offline
+# doubles see. media-playback-stop is in every theme measured.
+{	my $bfixture=File::Spec->catfile('t','layouts','buttons.layout');
+	my $bcatalog=Layout::Parser::ParseFiles(files=>[$bfixture]);
+	is(scalar @{$bcatalog->{diagnostics}},0,'button fixture parses without diagnostics');
+	my $stopped=0;
+	my $bfrontend;
+	$bfrontend=GMB::Frontend->new
+	(	commands=>
+		{ Stop=>sub {$stopped++; return 1}, PlayPause=>sub {1}, Quit=>sub {1} },
+		state=>{Playing=>sub {0}},
+	);
+	my $brenderer=Layout::Renderer::Gtk4->new
+	(	catalog=>$bcatalog,
+		frontend=>$bfrontend,
+		labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
+		icon_path=>'pix',
+	);
+	$brenderer->Render('gtk4 buttons');
+
+	my $stop=$brenderer->Widget('Stop');
+	is($stop->get_icon_name,'media-playback-stop',
+		'Stop resolves its default stock through the icon theme');
+	is($stop->get_label,undef,'an icon Stop button carries no text label');
+	is($stop->get_tooltip_text,'Stop','Stop keeps its tooltip alongside the icon');
+
+	# a layout stock= option overrides the widget default
+	is($brenderer->Widget('Stop3')->get_icon_name,'gmb-random',
+		'a layout stock option overrides the widget default icon');
+
+	# 'activate' needs a mapped, focusable widget; emitting 'clicked' is the
+	# same route a real click takes and is what 20_Paned.t uses for actions.
+	$stop->signal_emit('clicked');
+	is($stopped,1,'a real GTK4 button dispatches Stop when clicked');
+	$brenderer->Destroy;
+}
 
 done_testing;

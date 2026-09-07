@@ -10,7 +10,7 @@ make test-modernization
 
 This runs the neutral layout parser, frontend contract and lifecycle, legacy
 adapter and lifecycle integration, and GTK4 renderer contract tests. On
-2026-09-07 it reported 261 executed assertions passed and no skips. The
+2026-09-07 it reported 269 executed assertions passed and no skips. The
 renderer test uses small in-process GTK doubles; it proves the
 parser/renderer/command wiring without claiming that a real GTK4 binding or
 display passed.
@@ -68,9 +68,9 @@ The action test uses [cycle-handle-focus](https://docs.gtk.org/gtk4/signal.Paned
 before [move-handle](https://docs.gtk.org/gtk4/signal.Paned.move-handle.html).
 
 `t/gtk4/30_Box.t` adds real `HB`/`VB` packing geometry to the runner. On
-2026-09-07 the full `make test-gtk4` run reported 167 TAP results: 161 executed
+2026-09-07 the full `make test-gtk4` run reported 173 TAP results: 167 executed
 assertions passed and the same six feasibility probes were skipped. The box file
-contributes 34 executed assertions and the icon file 27. They read allocated child offsets with
+contributes 34 executed assertions and the icon file 33. They read allocated child offsets with
 [translate_coordinates](https://docs.gtk.org/gtk4/method.Widget.translate_coordinates.html);
 `compute_bounds` and `compute_point` are unusable through this binding, which
 reports `GType GrapheneRect ... is not registered with gperl`. That is a
@@ -114,7 +114,7 @@ effect on an already-mapped Wayland window. `t/gtk4/20_Paned.t` used
 on that account, before and independently of the box change; it now uses
 `set_size_request`, and all 84 pane assertions pass.
 
-`t/gtk4/40_Icons.t` covers GTK4 icon resolution with 27 executed assertions on
+`t/gtk4/40_Icons.t` covers GTK4 icon resolution with 33 executed assertions on
 real Wayland. It uses `t/layouts/icons.layout`, which exercises a legacy `gtk-*`
 name, the `stock=` option, a bundled `gmb-*` file, a bundled alias with no file
 of its own, an unresolvable name, and a widget with no icon option. It then
@@ -226,6 +226,30 @@ scripted GTK3 startup/shutdown smoke on this host. Do not cite one as passing.
 `perl -c gmusicbrowser_layout.pm` fails on the `_"..."`
 gettext idiom for the committed file as well; that module is not standalone
 compilable and the failure is not a regression.
+
+The `Stop` widget increment is covered on both sides. `t/layouts/buttons.layout`
+is the fixture. Offline in `t/04_Gtk4LayoutRenderer.t` there is no icon theme
+behind the doubles, so every icon resolves to nothing and the assertions cover
+the text fallback, the default tooltip, a layout `tip=` override, and repeated
+stateless dispatch. On real Wayland in `t/gtk4/40_Icons.t` the same fixture
+resolves `media-playback-stop` from the host theme, carries no text label, keeps
+its tooltip, honours a layout `stock=` override, and dispatches `Stop` when
+`clicked` is emitted.
+
+Both are behaviour, not construction: run against HEAD before the increment,
+each file dies with `GTK4 widget 'Stop' is not implemented`, so neither can pass
+against the previous renderer.
+
+`Gtk4::Button->activate` does not work for this: it needs a mapped, focusable
+widget and left the command undispatched. Emitting `clicked` is the signal a
+real click raises and is the same technique `t/gtk4/20_Paned.t` uses for action
+signals. Neither is synthesised pointer input.
+
+Adding a `%Buttons` default `stock` made every button consult the icon theme,
+where previously only a layout-supplied icon did. That broke the offline doubles,
+which have no `Gtk4::Gdk::Display::get_default` at all, so `_IconTheme` now
+wraps the display lookup in `eval`: the subroutine is absent rather than merely
+returning nothing when the renderer runs without a real binding.
 
 `t/01_ModFileMetadata.t` remains outside the offline target because it downloads
 media samples at runtime and the repository contains none of those samples.

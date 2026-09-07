@@ -108,8 +108,11 @@ use lib '.';
 }
 {	package Gtk4::Button;
 	our @ISA=('Gtk4::Widget::Double');
+	sub new { bless {signals=>{}},$_[0] }
 	sub new_with_label { bless {label=>$_[1],signals=>{}},$_[0] }
 	sub set_label { $_[0]{label}=$_[1] }
+	sub set_icon_name { $_[0]{icon_name}=$_[1] }
+	sub set_tooltip_text { $_[0]{tooltip}=$_[1] }
 	sub signal_connect { $_[0]{signals}{$_[1]}=$_[2] }
 	sub activate { $_[0]{signals}{clicked}->($_[0]) }
 }
@@ -135,7 +138,7 @@ $frontend=GMB::Frontend->new
 my $renderer=Layout::Renderer::Gtk4->new
 (	catalog=>$catalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit'},
+	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
 	context=>{window_id=>'MainWindow',group=>'Play',selected_ids=>[]},
 );
 my $root=$renderer->Render('gtk4 proof');
@@ -168,7 +171,7 @@ is(scalar @{$ccatalog->{diagnostics}},0,'container fixture parses without diagno
 my $crenderer=Layout::Renderer::Gtk4->new
 (	catalog=>$ccatalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit'},
+	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
 );
 my $paned=$crenderer->Render('gtk4 containers');
 
@@ -247,7 +250,7 @@ for my $case
 	$node->{children}[1]{packing}{raw}=$end;
 	my $prenderer=Layout::Renderer::Gtk4->new
 	(	catalog=>$pcatalog, frontend=>$frontend,
-		labels=>{play=>'Play',pause=>'Pause',quit=>'Quit'},
+		labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
 	);
 	my $pane=$prenderer->Render('gtk4 containers');
 	$pane->allocate(600);
@@ -268,7 +271,7 @@ is(scalar @{$pkcatalog->{diagnostics}},0,'packing fixture parses without diagnos
 my $pkrenderer=Layout::Renderer::Gtk4->new
 (	catalog=>$pkcatalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit'},
+	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
 );
 $pkrenderer->Render('gtk4 packing');
 
@@ -301,7 +304,7 @@ is(scalar @{$scatalog->{diagnostics}},0,'single-child fixture parses without dia
 my $srenderer=Layout::Renderer::Gtk4->new
 (	catalog=>$scatalog,
 	frontend=>$frontend,
-	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit'},
+	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
 );
 $srenderer->Render('gtk4 single');
 
@@ -330,5 +333,46 @@ isa_ok($event,'Gtk4::Box');
 is($event->{children}[0],$srenderer->Widget('Label5'),'WB holds its child');
 
 $srenderer->Destroy;
+
+# Stateless command buttons come from the renderer's %Buttons table rather than
+# a bespoke branch per widget. There is no icon theme behind the doubles, so
+# every icon resolves to nothing here and the buttons must stay operable on the
+# text fallback; the icon path itself is covered on real Wayland.
+my $buttons=File::Spec->catfile('t','layouts','buttons.layout');
+my $bcatalog=Layout::Parser::ParseFiles(files=>[$buttons]);
+is(scalar @{$bcatalog->{diagnostics}},0,'button fixture parses without diagnostics');
+my $stopped=0;
+my $bfrontend;
+$bfrontend=GMB::Frontend->new
+(	commands =>
+	{	Stop => sub {$stopped++; return 1},
+		PlayPause => sub {1},
+		Quit => sub {1},
+	},
+	state => {Playing=>sub {0}},
+);
+my $brenderer=Layout::Renderer::Gtk4->new
+(	catalog=>$bcatalog,
+	frontend=>$bfrontend,
+	labels=>{play=>'Play',pause=>'Pause',quit=>'Quit',stop=>'Stop'},
+	context=>{window_id=>'MainWindow',group=>'Play',selected_ids=>[]},
+);
+$brenderer->Render('gtk4 buttons');
+
+my $stop=$brenderer->Widget('Stop');
+isa_ok($stop,'Gtk4::Button');
+is($stop->{label},'Stop','Stop falls back to its label when no icon resolves');
+is($stop->{tooltip},'Stop','Stop applies the widget default tip as a tooltip');
+$stop->activate;
+is($stopped,1,'Stop dispatches the exact legacy command name');
+$stop->activate;
+is($stopped,2,'Stop is stateless and dispatches on every click');
+
+# a tip in the layout overrides the widget default, as %$opt2 over %$ref does
+is($brenderer->Widget('Stop2')->{tooltip},'Custom tip','a layout tip overrides the default');
+# the authoritative icon option for Layout::Button is stock, not icon
+is($brenderer->Widget('Stop3')->{tooltip},'Stop','a layout stock option keeps the default tip');
+
+$brenderer->Destroy;
 
 done_testing;
