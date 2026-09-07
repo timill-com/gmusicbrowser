@@ -12,6 +12,30 @@ drop, async finish/error, and GStreamer loop coexistence are transfer, playback
 and packaging concerns. That is a change from every previous session, where a
 blocked probe sat in front of a widget group.
 
+## Read before choosing tomorrow's increment: SCALE_AND_TOOLING.md
+
+`docs/modernization/SCALE_AND_TOOLING.md`, written 2026-09-08, answers the
+user's two questions — how far the port is, and whether more tooling would speed
+it up. Two things in it change the priority order and are not recorded anywhere
+else:
+
+- **Only 4 of 76 bundled layouts render at all (5%).** Measured by rendering
+  every layout in the catalog headlessly and catching the failure. That is a
+  harsher and more useful measure than the 20.2% instance coverage, because a
+  layout at 95% of its widgets is still a layout that does not open.
+- **`MB` is the biggest single unlock, at 15 layouts blocked** — ahead of
+  `SimpleSearch` at 11. Instance counting ranks `MB` nowhere near the top (19
+  declarations against `MenuItem`'s 99 instances), which is why four sessions
+  of priority lists put `MenuItem` first. `MB` is what those layouts hit
+  *before* they reach a `MenuItem`, and D038's interpreter is already built
+  behind it.
+
+**Those two figures came from a scratch prototype and have no committed tool
+behind them yet**, so they are measured but not reproducible from the
+repository. Building `tools/layout-coverage` is the first recommended increment
+partly for that reason. The user asked for the whole assessment to be written
+down for review, which is what that file is.
+
 ## Most recent increment: the custom-drawing probe
 
 `t/gtk4/80_Drawing.t`, 32 assertions on real Wayland.

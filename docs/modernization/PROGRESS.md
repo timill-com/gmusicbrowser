@@ -11,6 +11,12 @@ holds the per-row detail and `SESSION_HANDOFF.md` the working notes.
 early spike with a solid layout-container and label-option base, and the
 widget surface is the bottleneck.
 
+**For the scale question — how far from a finished port, and would more tooling
+help — see [SCALE_AND_TOOLING.md](SCALE_AND_TOOLING.md).** It measures the
+distance several ways, and records that only **4 of 76 bundled layouts render at
+all**, which is a harsher and more useful figure than the instance coverage
+below.
+
 ## The one-paragraph summary
 
 GTK3 remains the complete, working application; nothing has been ported away
